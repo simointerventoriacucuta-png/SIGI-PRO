@@ -1,0 +1,47 @@
+# Arma el instalador de Windows (SIGI-Pro-Instalador-x.y.z.exe) en un servidor Windows de GitHub.
+# Se ejecuta en cada cambio de main y de las ramas claude/*, o a mano desde la pestaña Actions.
+# El .exe queda en "Releases" (rama main) y como artefacto descargable de la ejecución.
+name: Instalador de Windows
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  instalador:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # En main se publica en Releases el .exe, su .blockmap y latest.yml (los usa electron-updater para actualizar la app)
+      - name: Borrar el release de esta versión si ya existe
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release delete "v$VERSION" --yes --cleanup-tag 2>/dev/null || true
+      - name: Armar y publicar (main)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npx electron-builder --win nsis --publish always
+      - name: Armar sin publicar (otras ramas)
+        if: github.ref != 'refs/heads/main'
+        run: npx electron-builder --win nsis --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SIGI-Pro-Instalador
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml

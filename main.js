@@ -1,5 +1,5 @@
 // SIGI Pro - aplicación de escritorio (Electron). Muestra la bienvenida, arranca el servidor interno y abre la ventana.
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, Notification } = require('electron');
 const path = require('node:path');
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -7,7 +7,9 @@ app.setAppUserModelId('co.simo.sigi');
 
 // Los datos quedan en %APPDATA%\SIGI Pro (o en .\datos si se corre desde el código)
 process.env.SIGI_DATOS = app.isPackaged ? path.join(app.getPath('userData'), 'datos') : path.join(__dirname, 'datos');
-process.env.PORT = '0';
+// Puerto fijo (4027) para que Power BI y otros programas siempre encuentren los datos; si está ocupado, uno libre
+process.env.PORT = '4027';
+process.env.SIGI_PUERTO_LIBRE = '1';
 const ICONO = path.join(__dirname, 'build', 'icono.ico');
 
 let ventana;
@@ -25,12 +27,36 @@ app.whenReady().then(async () => {
     webPreferences: { contextIsolation: true, sandbox: true },
   });
   // Los enlaces externos se abren en el navegador del sistema, no dentro de la app
-  ventana.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  // Solo http(s) y mailto: nunca file:, smb: ni protocolos de otras apps (lista de chequeo de seguridad de Electron)
+  const externo = url => { try { return ['https:', 'http:', 'mailto:'].includes(new URL(url).protocol); } catch { return false; } };
+  ventana.webContents.setWindowOpenHandler(({ url }) => { if (externo(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // La ventana principal nunca navega fuera del servidor interno
+  ventana.webContents.on('will-navigate', (e, url) => {
+    if (new URL(url).origin !== `http://127.0.0.1:${puerto}`) { e.preventDefault(); if (externo(url)) shell.openExternal(url); }
+  });
   ventana.loadURL(`http://127.0.0.1:${puerto}/?v=${app.getVersion()}`);
   ventana.once('ready-to-show', () => setTimeout(() => {
     ventana.maximize(); ventana.show();
     if (!bienvenida.isDestroyed()) bienvenida.close();
   }, Math.max(0, 1800 - (Date.now() - inicio))));
 });
+// Actualización automática desde GitHub Releases (latest.yml que publica electron-builder).
+// Comprueba al iniciar y cada 4 horas; descarga en segundo plano y se instala al cerrar la app.
+function actualizaciones() {
+  if (!app.isPackaged) return; // desde el código no hay nada que actualizar
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  let avisado = false;
+  autoUpdater.on('update-downloaded', info => {
+    if (avisado) return; avisado = true;
+    new Notification({ title: 'SIGI Pro', body: `Hay una versión nueva (${info.version}), se instalará al cerrar.`, icon: ICONO }).show();
+  });
+  autoUpdater.on('error', e => console.error('Actualización:', e?.message || e)); // sin internet no pasa nada
+  const revisar = () => autoUpdater.checkForUpdates().catch(() => {});
+  revisar();
+  setInterval(revisar, 4 * 60 * 60 * 1000);
+}
+app.whenReady().then(actualizaciones);
 app.on('second-instance', () => { if (ventana) { if (ventana.isMinimized()) ventana.restore(); ventana.focus(); } });
 app.on('window-all-closed', () => app.quit());

@@ -52,7 +52,10 @@ CREATE TABLE IF NOT EXISTS item (
   cantidad REAL DEFAULT 0,
   vr_unitario REAL DEFAULT 0,
   sin_aiu INTEGER DEFAULT 0,      -- 1 = va por fuera del AIU (PMT, PMA...)
-  orden INTEGER DEFAULT 0
+  orden INTEGER DEFAULT 0,
+  otrosi_id INTEGER,              -- ítem no previsto: otrosí que lo aprobó
+  apu TEXT,                       -- análisis de precio unitario (JSON)
+  justificacion TEXT              -- justificación técnica de mayores/menores cantidades
 );
 
 -- Actas parciales (equivalen a las "estimaciones")
@@ -142,7 +145,11 @@ CREATE TABLE IF NOT EXISTS correspondencia (
   requiere_respuesta TEXT,
   plazo TEXT,
   estado TEXT DEFAULT 'Abierta',
-  archivo TEXT
+  archivo TEXT,
+  origen TEXT,              -- Gmail cuando se importó del correo
+  message_id TEXT,          -- Message-ID del correo (evita duplicados)
+  resumen_ia TEXT,          -- sugerencia de la IA: resumen
+  vencimientos_ia TEXT      -- sugerencia de la IA: vencimientos (JSON) pendientes de confirmar
 );
 
 CREATE TABLE IF NOT EXISTS bitacora (
@@ -154,7 +161,12 @@ CREATE TABLE IF NOT EXISTS bitacora (
   actividades TEXT,
   personal_obra INTEGER,
   equipos TEXT,
-  observaciones TEXT
+  observaciones TEXT,
+  hora TEXT,
+  incidentes TEXT,
+  visitas TEXT,
+  firma_residente TEXT,
+  firma_interventoria TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ensayo (
@@ -204,4 +216,724 @@ CREATE TABLE IF NOT EXISTS otrosi (
   objeto TEXT,                      -- qué modifica y por qué
   estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
   polizas_ajustadas TEXT DEFAULT 'No'
+);
+
+-- Programa de obra (importado de Microsoft Project)
+CREATE TABLE IF NOT EXISTS tarea (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  wbs TEXT,
+  nombre TEXT,
+  nivel INTEGER DEFAULT 1,
+  inicio TEXT,
+  fin TEXT,
+  avance_real REAL DEFAULT 0,     -- % ejecutado
+  resumen INTEGER DEFAULT 0,
+  hito INTEGER DEFAULT 0,
+  orden INTEGER DEFAULT 0
+);
+
+-- Alineamientos del corredor (LandXML de Civil 3D o InfraWorks) y tramos con su avance
+CREATE TABLE IF NOT EXISTS alineamiento (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL DEFAULT 0,
+  longitud REAL DEFAULT 0,
+  puntos TEXT                    -- JSON [[este, norte], ...]
+);
+CREATE TABLE IF NOT EXISTS tramo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  alineamiento_id INTEGER REFERENCES alineamiento(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL,
+  abs_fin REAL,
+  actividad TEXT,
+  avance REAL DEFAULT 0,          -- % ejecutado
+  fecha TEXT,
+  notas TEXT
+);
+
+-- Seguridad y salud en el trabajo (Decreto 1072 de 2015, Res. 0312 de 2019): inspecciones, permisos, incidentes y accidentes
+CREATE TABLE IF NOT EXISTS sst (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Inspección, Charla, Permiso de trabajo, Entrega de EPP, Verificación seguridad social, Incidente, Accidente
+  frente TEXT,
+  descripcion TEXT,
+  personas INTEGER,
+  dias_incapacidad INTEGER,       -- solo accidentes
+  hallazgo TEXT,
+  accion TEXT,
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Datos mensuales para los indicadores obligatorios (art. 30 Res. 0312)
+CREATE TABLE IF NOT EXISTS sst_mes (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  mes TEXT,                       -- AAAA-MM
+  trabajadores INTEGER,
+  accidentes INTEGER DEFAULT 0,
+  accidentes_mortales INTEGER DEFAULT 0,
+  dias_incapacidad INTEGER DEFAULT 0,
+  dias_cargados INTEGER DEFAULT 0,
+  dias_ausencia INTEGER DEFAULT 0,  -- ausentismo por causa médica
+  dias_programados INTEGER DEFAULT 0,
+  planillas_ok TEXT DEFAULT 'Pendiente', -- verificación PILA / ARL del contratista
+  notas TEXT
+);
+
+-- Anexos de SST que exige la interventoría (Decreto 1072 de 2015, Res. 0312 de 2019, Res. 4272 de 2021, Res. 1401 de 2007, GTC 45)
+-- Matriz de identificación de peligros y valoración de riesgos (GTC 45): NP = ND × NE, NR = NP × NC
+CREATE TABLE IF NOT EXISTS sst_peligro (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  proceso TEXT,
+  actividad TEXT,
+  rutinaria TEXT DEFAULT 'Sí',
+  peligro TEXT,
+  clasificacion TEXT,             -- Biológico, Físico, Químico, Psicosocial, Biomecánico, Condiciones de seguridad, Fenómenos naturales
+  efectos TEXT,
+  controles TEXT,                 -- controles existentes (fuente, medio, individuo)
+  nd INTEGER,                     -- nivel de deficiencia: 10, 6, 2, 0
+  ne INTEGER,                     -- nivel de exposición: 4, 3, 2, 1
+  nc INTEGER,                     -- nivel de consecuencia: 100, 60, 25, 10
+  np INTEGER,
+  nr INTEGER,
+  nivel TEXT,                     -- I, II, III, IV
+  aceptabilidad TEXT,
+  expuestos INTEGER,
+  intervencion TEXT,              -- eliminación, sustitución, ingeniería, administrativos, EPP
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Inspecciones con lista de chequeo (C cumple / NC no cumple / NA)
+CREATE TABLE IF NOT EXISTS sst_inspeccion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- EPP, Andamios, Excavaciones, Señalización, Extintores, Botiquín, Herramientas y equipos, Orden y aseo
+  frente TEXT,
+  inspector TEXT,
+  chequeo TEXT,                   -- JSON {pregunta: 'C'|'NC'|'NA'}
+  cumplimiento REAL,              -- % de C sobre (C + NC)
+  hallazgos TEXT,
+  accion TEXT,
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Permisos de trabajo de alto riesgo con su análisis de trabajo seguro (ATS)
+CREATE TABLE IF NOT EXISTS sst_permiso (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  numero TEXT,
+  tipo TEXT,                      -- Trabajo en alturas, Excavación, Trabajo en caliente, Espacio confinado, Eléctrico, Izaje de cargas
+  frente TEXT,
+  actividad TEXT,
+  altura REAL,                    -- m (alturas) o profundidad (excavación)
+  trabajadores TEXT,
+  coordinador TEXT,               -- coordinador de trabajo en alturas o persona competente
+  emisor TEXT,
+  ats TEXT DEFAULT 'No',
+  lista_chequeo TEXT DEFAULT 'No',
+  rescate TEXT DEFAULT 'No',      -- plan de rescate (Res. 4272 de 2021)
+  vigente_hasta TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Capacitaciones, inducciones y charlas con asistentes
+CREATE TABLE IF NOT EXISTS sst_capacitacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Inducción, Reinducción, Charla de 5 minutos, Capacitación, Trabajo en alturas, Brigada de emergencias
+  tema TEXT,
+  facilitador TEXT,
+  horas REAL,
+  asistentes INTEGER,
+  lista TEXT,                     -- nombres de los asistentes (la planilla firmada va como adjunto)
+  evaluacion TEXT,
+  estado TEXT DEFAULT 'Realizada'
+);
+-- Trabajadores del contratista: afiliaciones y certificados
+CREATE TABLE IF NOT EXISTS sst_trabajador (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  documento TEXT,
+  cargo TEXT,
+  eps TEXT,
+  afp TEXT,
+  arl TEXT,
+  grupo TEXT DEFAULT 'Operativo', -- Administrativo, Operativo, Subcontratista
+  ccf TEXT,                       -- caja de compensación familiar
+  riesgo TEXT,                    -- clase de riesgo ARL I a V (construcción: V)
+  ingreso TEXT,
+  retiro TEXT,
+  examen_ingreso TEXT,            -- fechas de los exámenes médicos ocupacionales
+  examen_periodico TEXT,
+  examen_retiro TEXT,
+  induccion TEXT,
+  notificacion_riesgos TEXT,
+  paz_salvo TEXT,
+  alturas_vence TEXT,             -- vencimiento del certificado de trabajo en alturas
+  estado TEXT DEFAULT 'Activo'
+);
+-- Entrega de elementos de protección personal por trabajador
+CREATE TABLE IF NOT EXISTS sst_epp (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  trabajador TEXT,
+  elemento TEXT,
+  cantidad INTEGER DEFAULT 1,
+  motivo TEXT,                    -- Dotación inicial, Reposición por desgaste, Pérdida
+  reposicion TEXT,                -- fecha prevista de reposición
+  firma TEXT DEFAULT 'Sí'
+);
+-- Verificación mensual de aportes a seguridad social (PILA) por trabajador
+CREATE TABLE IF NOT EXISTS sst_seguridad_social (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  mes TEXT,                       -- AAAA-MM
+  trabajador TEXT,
+  planilla TEXT,                  -- número de la planilla PILA
+  ibc REAL,
+  eps TEXT DEFAULT 'Pendiente',
+  afp TEXT DEFAULT 'Pendiente',
+  arl TEXT DEFAULT 'Pendiente',
+  ccf TEXT DEFAULT 'Pendiente',
+  verificado TEXT DEFAULT 'Pendiente',
+  observacion TEXT
+);
+-- Reporte e investigación de incidentes y accidentes (Res. 1401 de 2007: investigar dentro de los 15 días)
+CREATE TABLE IF NOT EXISTS sst_investigacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,                     -- fecha del evento
+  tipo TEXT,                      -- Incidente, Accidente leve, Accidente grave, Accidente mortal
+  trabajador TEXT,
+  frente TEXT,
+  descripcion TEXT,
+  dias_incapacidad INTEGER,
+  reporte_arl TEXT,               -- fecha del FURAT (2 días hábiles)
+  investigado TEXT,               -- fecha de la investigación
+  causas TEXT,                    -- causas inmediatas y básicas
+  acciones TEXT,
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Plan de emergencias, brigada y simulacros
+CREATE TABLE IF NOT EXISTS sst_emergencia (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Plan de emergencias, Simulacro, Brigada, Botiquín, Extintores, Punto de encuentro
+  escenario TEXT,
+  participantes INTEGER,
+  tiempo TEXT,                    -- tiempo de respuesta o evacuación
+  resultado TEXT,
+  mejoras TEXT,
+  proxima TEXT,                   -- próxima revisión o simulacro
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Maquinaria y vehículos: documentos e inspección preoperacional
+CREATE TABLE IF NOT EXISTS sst_equipo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  equipo TEXT,
+  placa TEXT,
+  modelo TEXT,
+  operador TEXT,
+  licencia TEXT,                  -- vencimiento de la licencia de conducción
+  tecnomecanica TEXT,
+  soat TEXT,
+  ultimo_preoperacional TEXT,
+  estado TEXT DEFAULT 'Operativo'
+);
+-- Cronograma del plan de trabajo SST, reuniones COPASST / COCOLA y obligaciones contractuales
+CREATE TABLE IF NOT EXISTS sst_actividad (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Cronograma SST, Reunión COPASST, Reunión COCOLA, Obligación contractual
+  actividad TEXT,
+  responsable TEXT,
+  estado TEXT DEFAULT 'Programada',
+  observacion TEXT
+);
+-- Soportes mensuales del informe SST (anexos 1 a 22); el archivo va como adjunto del registro
+CREATE TABLE IF NOT EXISTS sst_documento (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  mes TEXT,
+  anexo TEXT,                     -- "N. nombre del anexo"
+  descripcion TEXT,
+  estado TEXT DEFAULT 'Cargado'
+);
+
+-- Control ambiental: seguimiento a las fichas del PAGA o del PMA
+CREATE TABLE IF NOT EXISTS ambiental (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  programa TEXT,                  -- Gestión institucional, Actividades constructivas, Gestión hídrica, Biótico, Maquinaria y transporte, SST, Gestión social
+  ficha TEXT,                     -- código de la ficha en el PAGA/PMA del proyecto
+  actividad TEXT,
+  indicador TEXT,
+  meta REAL,
+  logro REAL,
+  cantidad REAL,                  -- p. ej. m³ de RCD, árboles talados
+  unidad TEXT,
+  permiso TEXT,                   -- aprovechamiento forestal, ocupación de cauce, vertimientos, sitio de disposición
+  hallazgo TEXT,
+  accion TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Plan de Manejo de Tránsito por frente de obra
+CREATE TABLE IF NOT EXISTS pmt (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  frente TEXT,
+  abs_ini TEXT,
+  abs_fin TEXT,
+  cierre TEXT,                    -- Total, Parcial, Por carril, Nocturno
+  interferencia TEXT,             -- Baja, Media, Alta
+  radicado TEXT,                  -- aprobación de la secretaría de tránsito
+  aprobado TEXT,                  -- fecha de aprobación
+  desde TEXT,
+  hasta TEXT,                     -- vigencia
+  dispositivos TEXT,              -- señales, conos, barricadas, canalizadores, paleteros
+  ultima_inspeccion TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  estado TEXT DEFAULT 'En trámite',
+  notas TEXT
+);
+
+-- Anexos ambientales (Guía de Manejo Ambiental de Proyectos de Infraestructura del INVÍAS, PAGA del contrato)
+-- Catálogo de fichas del PAGA con su indicador, meta y periodicidad
+CREATE TABLE IF NOT EXISTS amb_ficha (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  programa TEXT,
+  codigo TEXT,                    -- p. ej. PAC-2.1, PGH-3.1
+  nombre TEXT,
+  indicador TEXT,
+  meta REAL,
+  unidad TEXT,
+  periodicidad TEXT,              -- Diaria, Semanal, Mensual, Trimestral, Única
+  responsable TEXT,
+  presupuesto REAL,               -- presupuesto PAGA programado de la ficha
+  ejecutado REAL,                 -- ejecutado acumulado
+  notas TEXT                      -- avances y modificaciones de la ficha en el PAGA
+);
+
+-- Matriz de requisitos legales ambientales
+CREATE TABLE IF NOT EXISTS amb_requisito (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  norma TEXT,
+  emisor TEXT,
+  lineamiento TEXT,
+  ficha TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  evidencia TEXT
+);
+
+-- Permisos ambientales y fuentes de materiales (Decreto 1076 de 2015; Ley 685 de 2001)
+CREATE TABLE IF NOT EXISTS amb_permiso (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  tipo TEXT,                      -- Aprovechamiento forestal, Ocupación de cauce, Concesión de aguas, Vertimientos, Fuente de materiales, Sitio de disposición de RCD, Emisiones atmosféricas
+  autoridad TEXT,                 -- CAR o autoridad ambiental
+  acto TEXT,                      -- resolución o auto
+  fecha TEXT,
+  vence TEXT,
+  titular TEXT,
+  titulo_minero TEXT,             -- fuentes de materiales: título minero o RUCOM
+  autorizado TEXT,                -- caudal, volumen o individuos autorizados
+  obligaciones TEXT,
+  estado TEXT DEFAULT 'En trámite'
+);
+
+-- Residuos de construcción y demolición (Res. 1257 de 2021)
+CREATE TABLE IF NOT EXISTS rcd (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  tipo TEXT,                      -- Aprovechable, No aprovechable, Peligroso
+  generado REAL,
+  aprovechado REAL,
+  dispuesto REAL,
+  unidad TEXT DEFAULT 't',
+  sitio TEXT,                     -- gestor, punto limpio o sitio de disposición final autorizado
+  certificado TEXT,               -- certificado o manifiesto del gestor
+  notas TEXT
+);
+
+-- Inventario forestal y compensación
+CREATE TABLE IF NOT EXISTS forestal (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  codigo TEXT,
+  especie TEXT,
+  nombre_comun TEXT,
+  abscisa TEXT,
+  dap REAL,                       -- diámetro a la altura del pecho, cm
+  altura REAL,
+  volumen REAL,                   -- m³
+  tratamiento TEXT,               -- Conservar, Poda, Tala, Bloqueo y traslado
+  permiso TEXT,
+  compensar REAL,                 -- individuos a sembrar
+  sembrados REAL,
+  estado TEXT DEFAULT 'Inventariado'
+);
+
+-- Consumo de agua por fuente
+CREATE TABLE IF NOT EXISTS agua (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  fuente TEXT,
+  uso TEXT,
+  volumen REAL,                   -- m³
+  permiso TEXT,
+  notas TEXT
+);
+
+-- Maquinaria y vehículos: mantenimiento, emisiones y aceites usados
+CREATE TABLE IF NOT EXISTS maquinaria (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  equipo TEXT,
+  placa TEXT,
+  ultimo_mtto TEXT,
+  proximo_mtto TEXT,
+  emisiones TEXT,                 -- certificado de revisión técnico-mecánica y de emisiones
+  vence_emisiones TEXT,
+  aceite REAL,                    -- galones de aceite usado entregados
+  gestor_aceite TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  notas TEXT
+);
+
+-- Monitoreos ambientales (ruido, aire, agua)
+CREATE TABLE IF NOT EXISTS monitoreo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,
+  punto TEXT,
+  parametro TEXT,
+  resultado REAL,
+  limite REAL,
+  unidad TEXT,
+  norma TEXT,
+  laboratorio TEXT,
+  cumple TEXT DEFAULT 'Pendiente'
+);
+
+-- Lista de chequeo ambiental de obra
+CREATE TABLE IF NOT EXISTS amb_chequeo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  aspecto TEXT,
+  cumple TEXT DEFAULT 'Sí',
+  observacion TEXT,
+  accion TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Inspecciones al PMT y estado de los dispositivos (Manual de Señalización Vial, cap. 4)
+CREATE TABLE IF NOT EXISTS pmt_inspeccion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  dispositivo TEXT,
+  requeridos REAL,
+  instalados REAL,
+  condicion TEXT,                 -- Buena, Regular, Mala
+  cumple TEXT DEFAULT 'Sí',
+  observacion TEXT,
+  accion TEXT
+);
+
+-- Gestión social: fichas del PGS (atención a la comunidad, divulgación, predios, mano de obra local, cultura vial)
+CREATE TABLE IF NOT EXISTS social (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  ficha TEXT,
+  tipo TEXT,                      -- PQRS, Reunión de inicio/avance/finalización, Socialización, Acta de vecindad, Mano de obra local, Cultura vial, Visita
+  comunidad TEXT,
+  descripcion TEXT,
+  asistentes INTEGER,
+  responsable TEXT,
+  respuesta TEXT,
+  plazo TEXT,                     -- PQRS: 15 días hábiles (Ley 1755 de 2015)
+  estado TEXT DEFAULT 'Abierto'
+);
+
+CREATE TABLE IF NOT EXISTS suspension (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER,
+  fecha_suspension TEXT,
+  fecha_reinicio TEXT,              -- vacía mientras siga suspendido
+  motivo TEXT,
+  acta TEXT,                        -- número o referencia del acta de suspensión
+  estado TEXT DEFAULT 'Suspendido', -- Suspendido, Reiniciado
+  polizas_ajustadas TEXT DEFAULT 'No'
+);
+
+CREATE TABLE IF NOT EXISTS liquidacion (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL UNIQUE REFERENCES contrato(id) ON DELETE CASCADE,
+  tipo TEXT DEFAULT 'Bilateral',    -- Bilateral, Unilateral, Judicial
+  fecha_recibo_final TEXT,
+  fecha_liquidacion TEXT,
+  valor_ejecutado REAL DEFAULT 0,
+  saldo_a_favor_contratista REAL DEFAULT 0,
+  saldo_a_favor_entidad REAL DEFAULT 0,
+  devolucion_retenciones REAL DEFAULT 0,
+  paz_y_salvos TEXT,
+  observaciones TEXT,
+  estado TEXT DEFAULT 'En trámite'  -- En trámite, Firmada, Cerrada
+);
+
+-- Cantidades que cada otrosí suma (+) o resta (−) a un ítem del presupuesto
+CREATE TABLE IF NOT EXISTS otrosi_item (
+  id INTEGER PRIMARY KEY,
+  otrosi_id INTEGER NOT NULL REFERENCES otrosi(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
+  cantidad REAL DEFAULT 0,
+  vr_unitario REAL                  -- opcional, para ítems nuevos
+);
+
+-- Archivos adjuntos y registro fotográfico de cualquier registro (póliza, acta, otrosí, SST...)
+-- El contenido va aparte (adjunto_dato) para que las listas carguen rápido; ambos se sincronizan con Turso
+CREATE TABLE IF NOT EXISTS adjunto (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  tabla TEXT,                     -- a qué pertenece: poliza, acta, otrosi... o 'proyecto' para el registro general
+  registro_id INTEGER,
+  categoria TEXT DEFAULT 'Documento', -- Documento, Foto
+  nombre TEXT,
+  tipo_mime TEXT,
+  tamano INTEGER,
+  fecha TEXT,
+  frente TEXT,
+  abscisa TEXT,
+  punto TEXT,                     -- punto fijo de toma (fotos comparables en el tiempo)
+  descripcion TEXT,
+  lat REAL,
+  lon REAL,
+  usuario TEXT,
+  creado TEXT
+);
+CREATE TABLE IF NOT EXISTS adjunto_dato (
+  adjunto_id INTEGER PRIMARY KEY REFERENCES adjunto(id) ON DELETE CASCADE,
+  datos BLOB
+);
+
+-- Captura de avance en campo: memoria de cantidades por abscisa con registro fotográfico.
+-- La cantidad entra sola a la cantidad presentada del acta en borrador del periodo.
+CREATE TABLE IF NOT EXISTS avance (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  contrato_id INTEGER REFERENCES contrato(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  abs_ini REAL,                   -- metros
+  abs_fin REAL,
+  largo REAL, ancho REAL, espesor REAL, piezas REAL,
+  cantidad REAL DEFAULT 0,
+  descripcion TEXT,
+  estado TEXT DEFAULT 'Reportado', -- Reportado, Verificado, Rechazado
+  acta_id INTEGER,                 -- acta a la que se sumó
+  usuario TEXT,
+  lat REAL, lon REAL
+);
+
+-- Lista de chequeo documental de cada acta (hoja de ruta, punto 9)
+CREATE TABLE IF NOT EXISTS acta_requisito (
+  id INTEGER PRIMARY KEY,
+  acta_id INTEGER NOT NULL REFERENCES acta(id) ON DELETE CASCADE,
+  orden INTEGER DEFAULT 0,
+  requisito TEXT NOT NULL,
+  obligatorio INTEGER DEFAULT 1,
+  estado TEXT DEFAULT 'Pendiente',  -- Pendiente, Cumple, No cumple, No aplica
+  referencia TEXT,                  -- radicado, folio o enlace de SECOP II
+  observacion TEXT
+);
+
+-- Requisiciones (RQ): pedidos internos de bienes o servicios, con aprobación del director
+CREATE TABLE IF NOT EXISTS requisicion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  contrato_id INTEGER REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER NOT NULL,
+  fecha TEXT,
+  solicitante TEXT,
+  frente TEXT,
+  justificacion TEXT,
+  estado TEXT DEFAULT 'Borrador',   -- Borrador, Solicitada, Aprobada, Rechazada, Atendida
+  aprobado_por TEXT,
+  fecha_aprobacion TEXT,
+  motivo_rechazo TEXT,
+  proveedor TEXT,
+  documento TEXT,                   -- factura u orden con que se atendió
+  fecha_atencion TEXT,
+  gasto_id INTEGER                  -- gasto creado al atenderla (contrato de interventoría)
+);
+CREATE TABLE IF NOT EXISTS requisicion_item (
+  id INTEGER PRIMARY KEY,
+  requisicion_id INTEGER NOT NULL REFERENCES requisicion(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE SET NULL,
+  descripcion TEXT,
+  unidad TEXT,
+  cantidad REAL DEFAULT 0,
+  vr_unitario REAL DEFAULT 0
+);
+
+-- Gestión social ampliada: Plan de Gestión Social (INVÍAS) / PGSC (ANI, Apéndice Técnico 8)
+-- PQRS con radicado. Plazos de la Ley 1755 de 2015 (art. 14) en días hábiles, sin festivos de Colombia (Ley 51 de 1983)
+CREATE TABLE IF NOT EXISTS pqrs (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  radicado TEXT,
+  fecha TEXT,                     -- recibida
+  tipo TEXT DEFAULT 'Petición',   -- Petición, Queja, Reclamo, Sugerencia, Denuncia, Solicitud de documentos, Consulta, Felicitación
+  canal TEXT,                     -- Oficina de atención, Buzón, Correo, Teléfono, Punto móvil, Reunión
+  peticionario TEXT,
+  frente TEXT,
+  descripcion TEXT,
+  plazo TEXT,                     -- 15 días (10 documentos, 30 consultas)
+  fecha_respuesta TEXT,
+  respuesta TEXT,
+  estado TEXT DEFAULT 'Abierta'   -- Abierta, En trámite, Respondida, Cerrada
+);
+-- Reuniones con la comunidad (inicio, avance, finalización) con lista de asistencia y acta
+CREATE TABLE IF NOT EXISTS reunion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Inicio, Avance, Finalización, Extraordinaria, Comité de participación
+  lugar TEXT,
+  comunidad TEXT,
+  convocados INTEGER,
+  asistentes INTEGER,
+  temas TEXT,
+  compromisos TEXT,
+  acta TEXT,                      -- número del acta
+  lista_asistencia TEXT DEFAULT 'No',
+  estado TEXT DEFAULT 'Programada' -- Programada, Realizada, Acta firmada
+);
+-- Actas de vecindad por predio: inicio y cierre (paz y salvo)
+CREATE TABLE IF NOT EXISTS acta_vecindad (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  predio TEXT,                    -- código o ficha predial
+  direccion TEXT,
+  abscisa TEXT,
+  tipo_inmueble TEXT,             -- Vivienda, Comercio, Institucional, Lote
+  propietario TEXT,
+  fecha_inicio TEXT,
+  estado_inicio TEXT,             -- descripción de fisuras, humedades, acabados
+  fecha_cierre TEXT,
+  estado_cierre TEXT,
+  danos TEXT DEFAULT 'No',
+  paz_y_salvo TEXT DEFAULT 'No',
+  estado TEXT DEFAULT 'Inicio levantado' -- Inicio levantado, Cierre pendiente, Cerrada, Con reclamación
+);
+-- Vinculación de mano de obra local por mes frente a la meta del contrato
+CREATE TABLE IF NOT EXISTS mano_obra (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  mes TEXT,                       -- AAAA-MM
+  total INTEGER DEFAULT 0,
+  local_no_calificada INTEGER DEFAULT 0,
+  local_calificada INTEGER DEFAULT 0,
+  mujeres INTEGER DEFAULT 0,
+  meta REAL,                      -- % de mano de obra local exigido en el contrato
+  notas TEXT
+);
+-- Cultura vial y capacitaciones a la comunidad
+CREATE TABLE IF NOT EXISTS capacitacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Cultura vial, Capacitación, Taller, Divulgación
+  tema TEXT,
+  publico TEXT,                   -- Escolares, Conductores, Peatones, Comunidad, Trabajadores
+  lugar TEXT,
+  asistentes INTEGER,
+  notas TEXT
+);
+-- Afectaciones a predios y a redes de servicios públicos
+CREATE TABLE IF NOT EXISTS afectacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Predio, Acueducto, Alcantarillado, Energía, Gas, Telecomunicaciones, Acceso vehicular, Acceso peatonal
+  abscisa TEXT,
+  descripcion TEXT,
+  afectados INTEGER,
+  empresa TEXT,                   -- empresa de servicios o responsable
+  accion TEXT,
+  fecha_solucion TEXT,
+  estado TEXT DEFAULT 'Abierta'
+);
+-- Encuestas de satisfacción de la comunidad
+CREATE TABLE IF NOT EXISTS encuesta (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Atención de PQRS, Reunión, Final de obra
+  encuestados INTEGER DEFAULT 0,
+  satisfechos INTEGER DEFAULT 0,
+  observaciones TEXT
+);
+-- Veedurías ciudadanas (Ley 850 de 2003)
+CREATE TABLE IF NOT EXISTS veeduria (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  registro TEXT,                  -- inscripción ante personería o cámara de comercio
+  fecha TEXT,                     -- conformación
+  integrantes INTEGER,
+  ultima_reunion TEXT,
+  solicitudes TEXT,
+  estado TEXT DEFAULT 'Activa'
+);
+-- Catálogo de fichas sociales del PAGA (Guía de Manejo Ambiental del INVÍAS 2022, programas 6 a 10). Se llena solo al arrancar.
+CREATE TABLE IF NOT EXISTS ficha_social (
+  id INTEGER PRIMARY KEY,
+  codigo TEXT UNIQUE,
+  programa TEXT,
+  nombre TEXT
 );
