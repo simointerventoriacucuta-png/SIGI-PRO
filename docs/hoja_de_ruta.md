@@ -43,7 +43,13 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
 9. **Listas de chequeo documental** (M4) para el acta de inicio, cada acta de pago y la liquidación, con adjunto y estado por requisito.
 10. **Comparativo de precios no previstos** (M3 y M4): APU frente a referencias, con mínimo, máximo y promedio.
 11. **Suspensiones y reinicios** con recálculo del plazo; **liquidación** con balance final y devolución de retenciones.
-12. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
+12. Aportes de M1:
+    - **Memoria de cantidades por ítem y acta:** abscisa inicial y final, costado, largo, ancho, espesor y piezas, o una fórmula; con fotos y estado medida → verificada → aprobada.
+    - **Importador de Excel** que deja escoger el rango y asignar columnas, y reconoce capítulos.
+    - **Adjuntos por registro** en actas, mediciones, ensayos, pólizas y oficios.
+    - Valor en letras en las actas.
+    - Semáforo de aprobación por fila.
+13. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
 
 ## Lo que no se copia de OPUS
 
