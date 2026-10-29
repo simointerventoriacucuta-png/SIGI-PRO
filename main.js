@@ -25,7 +25,13 @@ app.whenReady().then(async () => {
     webPreferences: { contextIsolation: true, sandbox: true },
   });
   // Los enlaces externos se abren en el navegador del sistema, no dentro de la app
-  ventana.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  // Solo http(s) y mailto: nunca file:, smb: ni protocolos de otras apps (lista de chequeo de seguridad de Electron)
+  const externo = url => { try { return ['https:', 'http:', 'mailto:'].includes(new URL(url).protocol); } catch { return false; } };
+  ventana.webContents.setWindowOpenHandler(({ url }) => { if (externo(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // La ventana principal nunca navega fuera del servidor interno
+  ventana.webContents.on('will-navigate', (e, url) => {
+    if (new URL(url).origin !== `http://127.0.0.1:${puerto}`) { e.preventDefault(); if (externo(url)) shell.openExternal(url); }
+  });
   ventana.loadURL(`http://127.0.0.1:${puerto}/?v=${app.getVersion()}`);
   ventana.once('ready-to-show', () => setTimeout(() => {
     ventana.maximize(); ventana.show();

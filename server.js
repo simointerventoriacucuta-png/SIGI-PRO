@@ -298,9 +298,13 @@ function enviar(res, codigo, cuerpo, tipo = 'application/json; charset=utf-8') {
   res.writeHead(codigo, { 'Content-Type': tipo, 'Cache-Control': 'no-store' });
   res.end(typeof cuerpo === 'string' || Buffer.isBuffer(cuerpo) ? cuerpo : JSON.stringify(cuerpo));
 }
+const MAX_CUERPO = 5 * 1024 * 1024; // 5 MB: suficiente para pegar presupuestos desde Excel
 function leerCuerpo(req) {
   return new Promise((ok, mal) => {
-    let s = ''; req.on('data', d => (s += d)); req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { mal(e); } });
+    const trozos = []; let n = 0, excedido = false;
+    req.on('data', d => { if (excedido) return; n += d.length; if (n > MAX_CUERPO) { excedido = true; trozos.length = 0; return mal(new Rechazo(413, 'La petición es demasiado grande')); } trozos.push(d); });
+    req.on('end', () => { if (excedido) return; const s = Buffer.concat(trozos).toString('utf8'); try { ok(s ? JSON.parse(s) : {}); } catch { mal(new Rechazo(400, 'El cuerpo de la petición no es JSON válido')); } });
+    req.on('error', mal);
   });
 }
 function limpiar(tabla, datos) {
@@ -345,7 +349,7 @@ async function api(req, res, url) {
   if (r0 === 'sync' && req.method !== 'GET') exigir(u, 'sync');
   if (r0 === 'sync' && r1 === 'probar') { const b = await leerCuerpo(req); return enviar(res, 200, await Base.probar(b.url, b.token)); }
   if (r0 === 'sync' && r1 === 'activar') { const b = await leerCuerpo(req); const r = await db.activarNube(b.url, b.token, ESQUEMA); await iniciar(); await auditar(u, 'sync', null, 'activar', { url: b.url }); return enviar(res, 200, r); }
-  if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); return enviar(res, 200, { ok: true }); }
+  if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); await auditar(u, 'sync', null, 'desactivar', null); return enviar(res, 200, { ok: true }); }
   if (r0 === 'sync' && r1 === 'ahora') { await db.sincronizar(); return enviar(res, 200, db.estado); }
 
   if (r0 === 'resumen') return enviar(res, 200, await resumen(Number(r1)));
@@ -398,7 +402,7 @@ async function api(req, res, url) {
   }
 
   // API genérica: /api/t/:tabla[/:id]
-  if (r0 === 't' && r1 in TABLAS) {
+  if (r0 === 't' && Object.hasOwn(TABLAS, r1)) {
     const tabla = r1, id = r2_ ? Number(r2_) : null, padre = TABLAS[tabla];
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
@@ -412,12 +416,15 @@ async function api(req, res, url) {
       if (tabla === 'item' && d.orden == null) d.orden = (await db.get('SELECT COALESCE(MAX(orden), 0) + 1 m FROM item WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta') await validarEstado(u, null, d);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
-      if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
-      if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
+      // Consecutivo de actas/otrosíes calculado dentro del mismo INSERT (atómico): evita números repetidos
+      // cuando dos usuarios crean a la vez y la base está en la nube (entre SELECT e INSERT hay espera de red)
+      const auto = (tabla === 'otrosi' || tabla === 'acta') && d.numero == null;
       const k = Object.keys(d);
-      const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
+      const r = auto
+        ? await db.run(`INSERT INTO ${tabla} (${[...k, 'numero'].join(',')}) VALUES (${k.map(() => '?').join(',')}${k.length ? ',' : ''}(SELECT COALESCE(MAX(numero), 0) + 1 FROM ${tabla} WHERE contrato_id = ?))`, ...Object.values(d), d.contrato_id ?? null)
+        : await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
       const nuevo = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, r.id);
-      await auditar(u, tabla, r.id, 'crear', d);
+      await auditar(u, tabla, r.id, 'crear', auto ? { ...d, numero: nuevo?.numero } : d);
       return enviar(res, 200, nuevo);
     }
     if (req.method === 'PUT' && id) {
@@ -441,12 +448,17 @@ async function api(req, res, url) {
   enviar(res, 404, { error: 'Ruta no encontrada' });
 }
 
+// Defensa contra DNS rebinding: solo se atienden peticiones dirigidas a este equipo por su nombre local
+const HOST_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const PUBLICO = path.join(RAIZ, 'public');
 const servidor = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+  if (!HOST_LOCAL.test(req.headers.host || '')) return enviar(res, 403, { error: 'Host no permitido' });
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { return enviar(res, 400, { error: 'URL inválida' }); }
   try {
     if (url.pathname.startsWith('/api/')) return await api(req, res, url);
-    const archivo = path.normalize(path.join(RAIZ, 'public', url.pathname === '/' ? 'index.html' : url.pathname));
-    if (!archivo.startsWith(path.join(RAIZ, 'public')) || !fs.existsSync(archivo)) return enviar(res, 404, 'No encontrado', 'text/plain');
+    const archivo = path.normalize(path.join(PUBLICO, url.pathname === '/' ? 'index.html' : url.pathname));
+    if (!archivo.startsWith(PUBLICO + path.sep) || !fs.existsSync(archivo) || !fs.statSync(archivo).isFile()) return enviar(res, 404, 'No encontrado', 'text/plain');
     enviar(res, 200, fs.readFileSync(archivo), TIPOS[path.extname(archivo)] || 'application/octet-stream');
   } catch (e) {
     if (e instanceof Rechazo) return enviar(res, e.codigo, { error: e.message });
@@ -455,6 +467,8 @@ const servidor = http.createServer(async (req, res) => {
     enviar(res, 500, { error: sinRed ? 'Sin conexión con la nube: puede consultar, pero los cambios no se guardaron. Revise el internet.' : e.message });
   }
 });
+// Un error asíncrono suelto no debe tumbar el servidor (la app de escritorio depende de él)
+process.on('unhandledRejection', e => console.error('Promesa rechazada sin capturar:', e));
 // Al arrancar desde la app de escritorio (main.js) se usa un puerto libre que se lee de aquí
 module.exports = iniciar().then(() => new Promise(ok => servidor.listen(PUERTO, '127.0.0.1', () => {
   const p = servidor.address().port;
