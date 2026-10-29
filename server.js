@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
+const { informeFormato } = require('./informe.js');
 
 const PUERTO = process.env.PORT != null ? Number(process.env.PORT) : 4027;
 const RAIZ = __dirname;
@@ -574,6 +575,11 @@ async function informeMensual(pid, mes) {
     const acumulado = hasta.length ? hasta[hasta.length - 1].acumulado : 0;
     return { ...c, actas_mes: c.actas.filter(a => enMes(a.hasta || a.fecha)), acumulado_mes: acumulado, pct: c.valor_vigente ? r2((acumulado / c.valor_vigente) * 100) : null };
   });
+  // Actividades del periodo: ítems con cantidad aprobada en las actas con corte en el mes
+  for (const c of contratos) {
+    c.actividades = [];
+    for (const a of c.actas_mes) c.actividades.push(...(await detalleActa(a.id)).filas.filter(f => f.tipo === 1 && f.cant_aprobada));
+  }
   const del = t => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha`, pid, ini, fin);
   const social = await db.all('SELECT * FROM social WHERE proyecto_id = ? ORDER BY fecha', pid);
   const pqrs = social.filter(s => s.tipo === 'PQRS' && s.estado !== 'Cerrado' && s.estado !== 'Respondido');
@@ -587,6 +593,16 @@ async function informeMensual(pid, mes) {
     social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
     vencimientos: r.vencimientos,
     director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría',
+    // Datos adicionales para la guía del informe del interventor y/o contratista
+    numero: (() => { const ob = r.contratos.find(c => c.tipo === 'obra') || r.contratos[0]; const i = ob?.fecha_inicio; return i ? Math.max(1, (+mes.slice(0, 4) - +i.slice(0, 4)) * 12 + (+mes.slice(5, 7) - +i.slice(5, 7)) + 1) : +mes.slice(5, 7); })(),
+    bitacora: await del('bitacora'), ensayos: await del('ensayo'), correspondencia: await del('correspondencia'),
+    personal: await db.all('SELECT * FROM personal WHERE proyecto_id = ? ORDER BY id', pid),
+    gastos: await db.all('SELECT g.* FROM gasto g JOIN contrato c ON c.id = g.contrato_id WHERE c.proyecto_id = ? AND g.fecha BETWEEN ? AND ?', pid, ini, fin),
+    items_np: await db.all("SELECT i.* FROM item i JOIN contrato c ON c.id = i.contrato_id WHERE c.proyecto_id = ? AND i.otrosi_id IS NOT NULL", pid),
+    anexos: await (async () => {
+      const a = await db.all("SELECT tabla, nombre, descripcion, tipo_mime FROM adjunto WHERE proyecto_id = ? AND categoria <> 'Foto' AND fecha BETWEEN ? AND ?", pid, ini, fin), g = {};
+      for (const x of a) { const k = /\.(dwg|dxf|kmz)$/i.test(x.nombre || '') || x.tabla === 'tramo' ? 'planos' : /recibo/i.test(x.descripcion || '') ? 'recibo' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : 'otros'; (g[k] = g[k] || []).push(x); }
+      return g; })(),
     // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
     fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
       .map(async a => ({ ...a, datos: Buffer.from((await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', a.id)).datos) }))) };
@@ -643,7 +659,7 @@ async function api(req, res, url) {
   const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (r0 === 'xlsx' && r1 === 'presupuesto') { const d = await presupuesto(Number(r2_)); return archivo(`Presupuesto_${d.contrato.tipo}.xlsx`, XLSX, await integ.xlsxPresupuesto(d)); }
   if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
-  if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await integ.docxInforme(d)); }
+  if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await informeFormato(d)); }
   if (r0 === 'docx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.docx`, DOCX, await integ.docxActa(d)); }
   if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
     exigir(u, 'item');
