@@ -180,3 +180,16 @@ svg.curva text { font-size: 10px; fill: #555; }
 .msg.user { background: var(--azul-claro); align-self: flex-end; max-width: 90%; }
 .msg.assistant { background: #f5f5f5; border: 1px solid #e5e5e5; }
 .chat-txt { width: 100%; height: 64px; margin-top: 8px; resize: none; }
+.gantt { position: relative; height: 14px; background: #f3f3f3; border-radius: 2px; }
+.gantt i { position: absolute; top: 2px; height: 10px; background: #90a4ae; border-radius: 2px; overflow: hidden; }
+.gantt i b { display: block; height: 100%; background: var(--verde); }
+.gantt s { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--rojo); }
+.plano { width: 100%; max-width: 1100px; height: auto; background: #fbfbf8; border: 1px solid var(--borde); border-radius: 4px; margin: 6px 0 12px; }
+.leyenda i { display: inline-block; width: 12px; height: 8px; margin: 0 4px 0 12px; border-radius: 2px; }
+.barras { display: grid; gap: 5px; margin-bottom: 10px; }
+.fila-barra { display: grid; grid-template-columns: 130px 1fr 150px; gap: 8px; align-items: center; font-size: 12px; }
+.fila-barra div { background: #eee; height: 14px; border-radius: 2px; }
+.fila-barra i { display: block; height: 100%; border-radius: 2px; }
+.fila-barra b { text-align: right; font-weight: 600; }
+.h3 { font-size: 13px; margin: 12px 0 6px; }
+.va.bueno { color: var(--verde); } .va.malo { color: var(--rojo); }

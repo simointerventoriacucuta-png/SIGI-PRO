@@ -74,7 +74,9 @@ const contrato = tipo => E.res?.contratos.find(c => c.tipo === tipo);
 // ---------- Cinta de opciones ----------
 // Grupo de edición del presupuesto: aparece en las pestañas Obra e Interventoría
 const EDITAR_PRES = ['Editar presupuesto', [['Nuevo capítulo', 'capitulo', () => nuevoItem(0), enPresupuesto], ['Nuevo ítem', 'item', () => nuevoItem(1), enPresupuesto],
-  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
+  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Importar Excel (.xlsx)', 'pegar', importarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
+// Documentos del acta: Excel y Word
+const DOC_ACTA = ['Documento del acta', [['Acta en Excel', 'exportar', exportarActa, enActa], ['Acta en Word', 'datos', () => (location.href = `/api/docx/acta/${E.activo.split(':')[1]}`), enActa]]];
 const ab = (tipo, vista) => () => abrir(vista + ':' + contrato(tipo)?.id);
 const CINTA = {
   inicio: ['Inicio', [
@@ -87,7 +89,9 @@ const CINTA = {
   obra: ['Ejecución de obra', [
     ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')]]],
     EDITAR_PRES,
-    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa], ['Exportar acta', 'exportar', exportarActa, enActa]]],
+    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa]]],
+    DOC_ACTA,
+    ['Programa y plano', [['Programa de obra (Project)', 'balance', () => abrir('programa')], ['Avance en el plano', 'mayores', () => abrir('plano')]]],
     ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')]]],
     ['Análisis', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores', 'mayores', ab('obra', 'mayores')]]],
   ]],
@@ -95,12 +99,19 @@ const CINTA = {
     ['Contrato propio', [['Contrato de interventoría', 'contrato', () => abrir('contrato:interventoria')], ['Presupuesto de interventoría', 'presupuesto', ab('interventoria', 'presupuesto')], ['Otrosíes', 'datos', ab('interventoria', 'otrosis')]]],
     EDITAR_PRES,
     ['Facturación', [['Nueva cuenta de cobro', 'acta', () => nuevaActa('interventoria')], ['Balance de facturación', 'balance', ab('interventoria', 'balance')]]],
+    DOC_ACTA,
     ['Costos reales', [['Registrar gastos', 'gasto', ab('interventoria', 'gastos')], ['Control de costos', 'costos', ab('interventoria', 'costos')]]],
     ['Recursos', [['Personal', 'personal', () => abrir('tabla:personal')], ['Pólizas', 'poliza', () => abrir('tabla:poliza')]]],
+  ]],
+  control: ['Control de obra', [
+    ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')]]],
+    ['Ambiental', [['Fichas PAGA / PMA', 'ensayo', () => abrir('tabla:ambiental')], ['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')]]],
+    ['Social', [['Gestión social (PGS) y PQRS', 'correo', () => abrir('tabla:social')]]],
   ]],
   informes: ['Informes', [
     ['Obra', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores cantidades', 'mayores', ab('obra', 'mayores')]]],
     ['Interventoría', [['Control de costos y utilidad', 'costos', ab('interventoria', 'costos')], ['Informe mensual (próximamente)', 'informe', null, () => false]]],
+    ['Power BI', [['Gráficos y datos para Power BI', 'balance', () => abrir('graficos')]]],
   ]],
 };
 function enPresupuesto() { return E.activo?.startsWith('presupuesto:'); }
@@ -123,13 +134,16 @@ function pintarArbol() {
   if (!E.res) return;
   const r = E.res, ob = contrato('obra'), it = contrato('interventoria');
   const n = (clave, texto, nivel = 0, cuenta = '', carpeta = false) => `<div class="nodo ${carpeta ? 'carpeta' : ''} ${E.activo === clave ? 'activo' : ''}" style="--nivel:${nivel}" ${clave ? `data-k="${clave}"` : ''}>${texto}<span class="cuenta">${cuenta}</span></div>`;
-  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia);
+  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI');
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
     h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length);
     h += n('', '📁 Actas parciales', 0, ob.actas.length, true) + ob.actas.map(a => n('acta:' + a.id, `Acta ${a.numero}`, 1, a.estado)).join('');
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
-    h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0);
+    h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
+    h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:ambiental', 'Fichas PAGA / PMA', 1) + n('tabla:pmt', 'PMT (tránsito)', 1)
+      + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
+      + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1);
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
   if (it) {
@@ -151,13 +165,15 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI' }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
 function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
-  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria' }[x];
+  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control' }[x];
+  if (t === 'programa' || t === 'plano') return 'obra';
+  if (t === 'graficos') return 'informes';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
   return E.res?.contratos.find(c => String(c.id) === x)?.tipo;
 }
@@ -185,7 +201,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos }[t];
     await vista(cont, x);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
@@ -326,7 +342,21 @@ function pegarExcel() {
     const r = await api('pegar', 'POST', { contrato_id: cid, filas }); $('#dialogo').close(); await refrescar(); aviso(r.filas + ' filas agregadas');
   };
 }
-async function exportarPresupuesto() {
+async function exportarPresupuesto() { location.href = '/api/xlsx/presupuesto/' + E.activo.split(':')[1]; }
+// Elegir un archivo del equipo y leerlo como texto o base64
+function elegirArchivo(acepta, comoTexto) {
+  return new Promise(ok => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = acepta;
+    i.onchange = () => { const f = i.files[0]; if (!f) return ok(null); const r = new FileReader();
+      r.onload = () => ok(comoTexto ? r.result : String(r.result).split(',')[1]); comoTexto ? r.readAsText(f) : r.readAsDataURL(f); };
+    i.click();
+  });
+}
+async function importarExcel() {
+  const archivo = await elegirArchivo('.xlsx', false); if (!archivo) return;
+  try { const r = await api('xlsx/importar/' + E.activo.split(':')[1], 'POST', { archivo }); await refrescar(); aviso(`${r.filas} filas importadas del Excel`); } catch (e) { aviso('Error: ' + e.message); }
+}
+async function exportarPresupuestoCsv() {
   const d = await api('presupuesto/' + E.activo.split(':')[1]);
   const n = v => String(v ?? '').replace('.', ',');
   const lineas = ['sep=;', 'Código;Descripción;Unidad;Cantidad;Vr. unitario;Vr. total', ...d.items.map(i => [i.codigo, `"${(i.descripcion || '').replace(/"/g, '""')}"`, i.unidad || '', i.tipo ? n(i.cantidad) : '', i.tipo ? n(i.vr_unitario) : '', i.tipo ? n(Math.round(i.cantidad * i.vr_unitario * 100) / 100) : ''].join(';'))];
@@ -392,6 +422,125 @@ async function vOtrosis(cont, cid) {
   editable(g, (td, v) => api('t/otrosi/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este otrosí?')) { try { await api('t/otrosi/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
   $('#o-nuevo').onclick = async () => { try { await api('t/otrosi', 'POST', { contrato_id: c.id, fecha: hoyISO(), estado: 'En trámite' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+}
+
+// ---------- Programa de obra (Microsoft Project) ----------
+async function vPrograma(cont) {
+  const d = await api('programa/' + E.pid);
+  const t = d.tareas.filter(x => x.inicio && x.fin);
+  const ini = Math.min(...t.map(x => Date.parse(x.inicio))), fin = Math.max(...t.map(x => Date.parse(x.fin)));
+  const X = f => (t.length ? ((Date.parse(f) - ini) / Math.max(1, fin - ini)) * 100 : 0);
+  const sem = d.spi == null ? '' : d.spi >= 0.95 ? 'bueno' : d.spi >= 0.85 ? '' : 'malo';
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Programa de obra</h2><span class="esp"></span>
+    <button class="btn" id="p-importar">Importar de Project (.xml)</button><button class="btn" id="p-exportar" ${d.tareas.length ? '' : 'disabled'}>Exportar a Project (.xml)</button></div>
+  <p class="sub">En Microsoft Project: Archivo → Guardar como → XML. Al importar se reemplaza el programa actual. El avance real se edita aquí y vuelve a Project al exportar.</p>
+  <div class="tarjetas">
+    <div class="tarjeta"><div class="et">Programado a hoy</div><div class="va">${fmt(d.programado, 1)} %</div></div>
+    <div class="tarjeta"><div class="et">Ejecutado</div><div class="va">${fmt(d.real, 1)} %</div><div class="barra"><i style="width:${Math.min(100, d.real)}%"></i></div></div>
+    <div class="tarjeta"><div class="et">Índice de cumplimiento (SPI)</div><div class="va ${sem}">${d.spi == null ? '—' : fmt(d.spi, 2)}</div><div class="no">≥ 0,95 al día · 0,85–0,95 atención · &lt; 0,85 atrasado</div></div>
+  </div>
+  <div class="grilla-cont"><table class="grilla" id="g-programa"><thead><tr><th>EDT</th><th>Actividad</th><th>Inicio</th><th>Fin</th><th class="num">Programado</th><th class="num">Real %</th><th style="width:38%">Diagrama</th></tr></thead><tbody>
+  ${d.tareas.map(x => `<tr data-id="${x.id}" class="${x.resumen ? 'cap' : ''}"><td>${esc(x.wbs)}</td><td style="padding-left:${(x.nivel - 1) * 14 + 6}px">${esc(x.nombre)}</td><td>${fechaLarga(x.inicio)}</td><td>${fechaLarga(x.fin)}</td>
+    <td class="num">${fmt(x.programado, 1)} %</td>${x.resumen ? `<td class="num">${fmt(x.avance_real, 1)}</td>` : celda(x.avance_real, 'avance_real', 'num', x.avance_real + 5 < x.programado ? 'style="color:#c62828;font-weight:600"' : '')}
+    <td><div class="gantt">${x.inicio && x.fin ? `<i style="left:${X(x.inicio)}%;width:${Math.max(0.6, X(x.fin) - X(x.inicio))}%"><b style="width:${Math.min(100, x.avance_real)}%"></b></i>` : ''}<s style="left:${X(d.hoy)}%"></s></div></td></tr>`).join('') || '<tr><td colspan="7" class="sub">Importe el programa desde Microsoft Project</td></tr>'}
+  </tbody></table></div>`;
+  editable($('#g-programa'), (td, v) => api('t/tarea/' + td.closest('tr').dataset.id, 'PUT', { avance_real: v }));
+  $('#p-importar').onclick = async () => {
+    const xml = await elegirArchivo('.xml', true); if (!xml) return;
+    try { const r = await api('project/' + E.pid, 'POST', { xml }); aviso(`${r.tareas} actividades importadas`); pintarDocs(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+  $('#p-exportar').onclick = () => (location.href = `/api/project/${E.pid}/xml`);
+}
+
+// ---------- Avance en el plano (LandXML de Civil 3D / InfraWorks) ----------
+const colorAvance = a => (a >= 100 ? '#2e7d32' : a >= 50 ? '#7cb342' : a > 0 ? '#f9a825' : '#bdbdbd');
+// Punto de la polilínea en una abscisa
+function puntoEn(al, abs) {
+  let falta = abs - al.abs_ini, p = al.puntos;
+  for (let i = 1; i < p.length; i++) {
+    const l = Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+    if (falta <= l) { const k = l ? falta / l : 0; return [p[i - 1][0] + (p[i][0] - p[i - 1][0]) * k, p[i - 1][1] + (p[i][1] - p[i - 1][1]) * k]; }
+    falta -= l;
+  }
+  return p[p.length - 1];
+}
+function tramoPolilinea(al, a, b) {
+  const pts = [puntoEn(al, a)];
+  let acum = al.abs_ini;
+  for (let i = 1; i < al.puntos.length; i++) {
+    acum += Math.hypot(al.puntos[i][0] - al.puntos[i - 1][0], al.puntos[i][1] - al.puntos[i - 1][1]);
+    if (acum > a && acum < b) pts.push(al.puntos[i]);
+  }
+  pts.push(puntoEn(al, b));
+  return pts;
+}
+const abscisa = v => (v == null ? '' : `K${Math.floor(v / 1000)}+${String((v % 1000).toFixed(2)).padStart(6, '0')}`);
+async function vPlano(cont) {
+  const d = await api('plano/' + E.pid);
+  const todos = d.alineamientos.flatMap(a => a.puntos);
+  let svg = '<p class="sub" style="padding:40px;text-align:center">Importe el eje del corredor desde Civil 3D o InfraWorks (LandXML)</p>';
+  if (todos.length) {
+    const xs = todos.map(p => p[0]), ys = todos.map(p => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const W = 1000, H = 520, m = 30, esc_ = Math.min((W - 2 * m) / Math.max(1, x1 - x0), (H - 2 * m) / Math.max(1, y1 - y0));
+    const P = p => `${(m + (p[0] - x0) * esc_).toFixed(1)},${(H - m - (p[1] - y0) * esc_).toFixed(1)}`;
+    const lineas = d.alineamientos.map(a => {
+      let h = `<polyline points="${a.puntos.map(P).join(' ')}" fill="none" stroke="#9e9e9e" stroke-width="10" stroke-linecap="round"/>`;
+      for (const t of d.tramos.filter(t => t.alineamiento_id === a.id && t.abs_ini != null && t.abs_fin != null))
+        h += `<polyline points="${tramoPolilinea(a, t.abs_ini, t.abs_fin).map(P).join(' ')}" fill="none" stroke="${colorAvance(t.avance)}" stroke-width="10"><title>${esc(t.nombre || '')} ${abscisa(t.abs_ini)} – ${abscisa(t.abs_fin)}: ${fmt(t.avance, 0)} % ${esc(t.actividad || '')}</title></polyline>`;
+      for (let k = Math.ceil(a.abs_ini / 100) * 100; k <= a.abs_ini + a.longitud; k += 100) {
+        const [px, py] = P(puntoEn(a, k)).split(',');
+        h += `<circle cx="${px}" cy="${py}" r="2.5" fill="#333"/>` + (k % 500 === 0 ? `<text x="${+px + 6}" y="${+py - 6}" font-size="11">${abscisa(k)}</text>` : '');
+      }
+      const [lx, ly] = P(a.puntos[0]).split(',');
+      return h + `<text x="${+lx + 8}" y="${+ly + 16}" font-size="12" font-weight="600">${esc(a.nombre)}</text>`;
+    }).join('');
+    svg = `<svg viewBox="0 0 ${W} ${H}" class="plano">${lineas}</svg>`;
+  }
+  const opAl = d.alineamientos.map(a => `${a.id}`).join('|');
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Avance en el plano</h2><span class="esp"></span>
+    <button class="btn" id="pl-importar">Importar eje (LandXML)</button><button class="btn prim" id="pl-tramo" ${d.alineamientos.length ? '' : 'disabled'}>+ Tramo</button></div>
+  <p class="sub">En Civil 3D: Salida → Exportar a LandXML; en InfraWorks: Exportar → LandXML. Pase el mouse sobre un tramo para ver su avance.
+    <span class="leyenda"><i style="background:#bdbdbd"></i>Sin iniciar <i style="background:#f9a825"></i>En ejecución <i style="background:#7cb342"></i>≥ 50 % <i style="background:#2e7d32"></i>Terminado</span></p>
+  ${svg}
+  <div class="grilla-cont"><table class="grilla" id="g-tramos"><thead><tr><th>Eje</th><th>Tramo</th><th class="num">Abscisa inicial (m)</th><th class="num">Abscisa final (m)</th><th>Actividad</th><th class="num">Avance %</th><th>Fecha</th><th>Notas</th><th></th></tr></thead><tbody>
+  ${d.tramos.map(t => `<tr data-id="${t.id}">${celda(t.alineamiento_id, 'alineamiento_id', 'select', `data-op="${opAl}"`).replace(/>\d+<\/td>$/, `>${esc(d.alineamientos.find(a => a.id === t.alineamiento_id)?.nombre || '')}</td>`)}${celda(t.nombre, 'nombre')}${celda(t.abs_ini, 'abs_ini', 'num')}${celda(t.abs_fin, 'abs_fin', 'num')}${celda(t.actividad, 'actividad')}${celda(t.avance, 'avance', 'num')}${celda(t.fecha, 'fecha', 'date')}${celda(t.notas, 'notas')}<td><button class="btn" data-borrar="${t.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin tramos</td></tr>'}
+  </tbody></table></div>`;
+  const g = $('#g-tramos');
+  editable(g, (td, v) => api('t/tramo/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'alineamiento_id' ? Number(v) : v }));
+  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este tramo?')) { await api('t/tramo/' + b.dataset.borrar, 'DELETE'); pintarDocs(); } });
+  $('#pl-importar').onclick = async () => {
+    const xml = await elegirArchivo('.xml,.landxml', true); if (!xml) return;
+    try { const r = await api('landxml/' + E.pid, 'POST', { xml }); aviso(`${r.alineamientos} eje(s) importado(s)`); pintarDocs(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+  $('#pl-tramo').onclick = async () => {
+    const a = d.alineamientos[0], ult = d.tramos.filter(t => t.alineamiento_id === a.id).pop();
+    const ini = ult?.abs_fin ?? a.abs_ini;
+    try { await api('t/tramo', 'POST', { proyecto_id: E.pid, alineamiento_id: a.id, abs_ini: ini, abs_fin: Math.min(ini + 100, a.abs_ini + a.longitud), avance: 0, fecha: hoyISO() }); pintarDocs(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+}
+
+// ---------- Gráficos y Power BI ----------
+function barras(datos, formato = pesos) {
+  const max = Math.max(1, ...datos.map(d => Math.abs(d.v)));
+  return `<div class="barras">${datos.map(d => `<div class="fila-barra"><span>${esc(d.n)}</span><div><i style="width:${(Math.abs(d.v) / max) * 100}%;background:${d.c || 'var(--azul)'}"></i></div><b>${formato(d.v)}</b></div>`).join('') || '<p class="sub">Sin datos</p>'}</div>`;
+}
+async function vGraficos(cont) {
+  const ob = contrato('obra'), it = contrato('interventoria');
+  const [prog, ind] = await Promise.all([api('programa/' + E.pid), api('sst-indicadores/' + E.pid)]);
+  const base = location.origin + '/api/bi/' + E.pid + '/';
+  const conjuntos = ['contratos', 'actas', 'items', 'gastos', 'programa', 'tramos', 'sst', 'sst_indicadores', 'ambiental', 'pmt', 'social'];
+  cont.innerHTML = `<h2>Gráficos y datos para Power BI</h2>
+  <div class="dos-col">
+    <div><h3 class="h3">Valor por acta de obra</h3>${barras((ob?.actas || []).map(a => ({ n: 'Acta ' + a.numero, v: a.valor })))}</div>
+    <div><h3 class="h3">Cuentas de cobro de interventoría</h3>${barras((it?.actas || []).map(a => ({ n: 'Cuenta ' + a.numero, v: a.valor, c: '#2e7d32' })))}</div>
+    <div><h3 class="h3">Ejecución de los contratos</h3>${barras([ob && { n: 'Obra ejecutado', v: ob.ejecutado }, ob && { n: 'Obra vigente', v: ob.valor_vigente, c: '#90a4ae' }, it && { n: 'Interv. facturado', v: it.ejecutado, c: '#2e7d32' }, it && { n: 'Interv. gastado', v: it.gastado, c: '#b26a00' }, it && { n: 'Interv. vigente', v: it.valor_vigente, c: '#90a4ae' }].filter(Boolean))}</div>
+    <div><h3 class="h3">Programa de obra</h3>${barras([{ n: 'Programado', v: prog.programado, c: '#90a4ae' }, { n: 'Ejecutado', v: prog.real }], v => fmt(v, 1) + ' %')}</div>
+    <div><h3 class="h3">SST · frecuencia de accidentalidad</h3>${barras(ind.map(m => ({ n: m.mes, v: m.frecuencia || 0, c: '#c62828' })), v => fmt(v, 2))}</div>
+  </div>
+  <h3 class="h3" style="margin-top:18px">Conectar Power BI</h3>
+  <p class="sub">En Power BI Desktop: <b>Obtener datos → Web</b>, pegue una de estas direcciones y pulse Aceptar. Con SIGI Pro abierto, <b>Actualizar</b> trae los datos al día. Para tableros compartidos en la nube, active la sincronización con Turso o exporte el CSV.</p>
+  <table class="grilla" style="max-width:900px"><tbody>${conjuntos.map(c => `<tr><td>${c}</td><td><code>${esc(base + c + '.csv')}</code></td><td><a href="${base + c}.csv">Descargar CSV</a></td></tr>`).join('')}</tbody></table>`;
 }
 
 // ---------- Usuarios y auditoría ----------
@@ -474,7 +623,7 @@ async function aprobarTodo() {
   if (!confirm('¿Copiar las cantidades presentadas como aprobadas en todos los ítems de esta acta?')) return;
   await api(`acta/${E.activo.split(':')[1]}/aprobar-todo`, 'POST'); await refrescar(); aviso('Cantidades aprobadas');
 }
-function exportarActa() { location.href = `/api/acta/${E.activo.split(':')[1]}/csv`; }
+function exportarActa() { location.href = `/api/xlsx/acta/${E.activo.split(':')[1]}`; }
 
 // Balance y mayores/menores
 async function vBalance(cont, id) {
@@ -541,13 +690,20 @@ async function vCostos(cont, cid) {
 
 // Tablas sencillas (control y registros)
 const ESTADOS = { vencimiento: 'Pendiente|En trámite|Cumplido|Vencido', personal: 'Propuesto|Aprobado|Vinculado|Por vincular|Retirado',
-  poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada' };
+  poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada',
+  sst: 'Abierto|En seguimiento|Cerrado', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+const PROGRAMAS_AMB = 'Desarrollo y aplicación de la gestión ambiental (DAGA)|Actividades constructivas|Gestión hídrica|Biótico (flora y fauna)|Instalaciones temporales, maquinaria y equipos|Gestión social|Seguridad y salud en el trabajo';
 const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
   personal: { titulo: 'Personal de interventoría', cols: [['nombre', 'Nombre'], ['cargo', 'Cargo'], ['dedicacion', 'Dedicación %', 'num'], ['cedula', 'Cédula'], ['matricula', 'Matrícula'], ['telefono', 'Teléfono'], ['correo', 'Correo'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   poliza: { titulo: 'Pólizas y garantías', cols: [['contrato', 'Contrato'], ['amparo', 'Amparo'], ['porcentaje', '%', 'num'], ['valor', 'Valor asegurado', 'num'], ['aseguradora', 'Aseguradora'], ['numero', 'N.º póliza'], ['desde', 'Desde', 'date'], ['hasta', 'Hasta', 'date'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   correspondencia: { titulo: 'Correspondencia', cols: [['fecha', 'Fecha', 'date'], ['sentido', 'Sentido', 'select:Recibida|Enviada'], ['radicado', 'Radicado'], ['de', 'De'], ['para', 'Para'], ['asunto', 'Asunto'], ['requiere_respuesta', '¿Responder?', 'select:Sí|No'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select'], ['archivo', 'Archivo']] },
   bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['clima', 'Clima', 'select:Seco|Lluvia|Lluvia intermitente'], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['observaciones', 'Observaciones']] },
+  sst: { titulo: 'SST · inspecciones, permisos y accidentes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inspección|Charla|Permiso de trabajo|Entrega de EPP|Verificación seguridad social (PILA/ARL)|Trabajo en alturas|Simulacro|Incidente|Accidente'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['personas', 'Personas', 'num'], ['dias_incapacidad', 'Días incap.', 'num'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_mes: { titulo: 'SST · datos mensuales (Res. 0312 de 2019)', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajadores', 'Trabajadores', 'num'], ['accidentes', 'Accidentes', 'num'], ['accidentes_mortales', 'Mortales', 'num'], ['dias_incapacidad', 'Días incapacidad', 'num'], ['dias_cargados', 'Días cargados', 'num'], ['dias_ausencia', 'Días ausencia', 'num'], ['dias_programados', 'Días programados', 'num'], ['planillas_ok', 'PILA/ARL verificada', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
+  ambiental: { titulo: 'Seguimiento ambiental (PAGA / PMA)', cols: [['fecha', 'Fecha', 'date'], ['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['ficha', 'Ficha'], ['actividad', 'Actividad'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['logro', 'Logro', 'num'], ['cantidad', 'Cantidad', 'num'], ['unidad', 'Und'], ['permiso', 'Permiso'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  pmt: { titulo: 'Planes de manejo de tránsito (PMT)', cols: [['frente', 'Frente'], ['abs_ini', 'Abscisa inicial'], ['abs_fin', 'Abscisa final'], ['cierre', 'Cierre', 'select:Total|Parcial|Por carril|Nocturno'], ['interferencia', 'Interferencia', 'select:Baja|Media|Alta'], ['radicado', 'Radicado aprobación'], ['aprobado', 'Aprobado', 'date'], ['desde', 'Vigente desde', 'date'], ['hasta', 'Vigente hasta', 'date'], ['dispositivos', 'Dispositivos'], ['ultima_inspeccion', 'Última inspección', 'date'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
+  social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   ensayo: { titulo: 'Ensayos de laboratorio', cols: [['fecha', 'Fecha', 'date'], ['ensayo', 'Ensayo'], ['norma', 'Norma'], ['item', 'Ítem'], ['abscisa', 'Abscisa'], ['resultado', 'Resultado'], ['especificacion', 'Especificación'], ['cumple', 'Cumple', 'select:Sí|No|Pendiente'], ['laboratorio', 'Laboratorio']] },
 };
 async function vTabla(cont, tabla) {
@@ -561,10 +717,18 @@ async function vTabla(cont, tabla) {
     return celda(f[k], k, t);
   }).join('')}<td><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
   </tbody></table></div>`;
+  if (tabla === 'sst_mes') {
+    const ind = await api('sst-indicadores/' + E.pid);
+    cont.insertAdjacentHTML('beforeend', `<h3 style="font-size:13px;margin:14px 0 4px">Indicadores obligatorios (art. 30 Res. 0312 de 2019)</h3>
+    <div class="grilla-cont"><table class="grilla"><thead><tr><th>Mes</th><th class="num">Frecuencia AT</th><th class="num">Severidad AT</th><th class="num">AT mortales %</th><th class="num">Ausentismo %</th><th>PILA/ARL</th></tr></thead><tbody>
+    ${ind.map(m => `<tr><td>${esc(m.mes)}</td><td class="num">${fmt(m.frecuencia)}</td><td class="num">${fmt(m.severidad)}</td><td class="num">${fmt(m.mortalidad)}</td><td class="num">${fmt(m.ausentismo)}</td><td>${esc(m.planillas_ok)}</td></tr>`).join('') || '<tr><td colspan="6" class="sub">Agregue los datos del mes arriba</td></tr>'}
+    </tbody></table></div><p class="sub">Frecuencia = AT del mes ÷ trabajadores × 100 · Severidad = (días de incapacidad + días cargados) ÷ trabajadores × 100 · Ausentismo = días de ausencia ÷ días programados × 100. Verifique las fórmulas con el texto oficial del Ministerio del Trabajo.</p>`);
+  }
+  if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
-  $('#t-nuevo').onclick = async () => { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(tabla === 'bitacora' || tabla === 'correspondencia' || tabla === 'ensayo' ? { fecha: hoyISO() } : {}) }); refrescar(); };
+  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social'].includes(tabla) ? { fecha: hoyISO() } : tabla === 'sst_mes' ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
 // ---------- Panel lateral ----------

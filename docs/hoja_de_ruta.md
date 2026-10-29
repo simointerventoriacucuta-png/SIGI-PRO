@@ -49,7 +49,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
     - **Adjuntos por registro** en actas, mediciones, ensayos, pólizas y oficios.
     - Valor en letras en las actas.
     - Semáforo de aprobación por fila.
-13. **Integraciones con otras aplicaciones** (pedido del usuario):
+13. ✅ **Integraciones con otras aplicaciones** (hecho: Excel .xlsx, acta en Word con valor en letras, Project XML, LandXML con avance en el plano, datos CSV/JSON para Power BI):
     - Exportar e importar con Excel (.xlsx), Word (actas e informes desde plantillas) y Microsoft Project (programa de obra y avance).
     - Autodesk (AutoCAD, Civil 3D, InfraWorks, Revit): leer alineamientos y abscisas para seguir el avance sobre el plano, por tramo e ítem.
     - Tableros tipo Power BI: publicar los datos (actas, avance, costos) para gráficos, y el asistente con Claude para analizarlos.

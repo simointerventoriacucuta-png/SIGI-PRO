@@ -205,3 +205,128 @@ CREATE TABLE IF NOT EXISTS otrosi (
   estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
   polizas_ajustadas TEXT DEFAULT 'No'
 );
+
+-- Programa de obra (importado de Microsoft Project)
+CREATE TABLE IF NOT EXISTS tarea (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  wbs TEXT,
+  nombre TEXT,
+  nivel INTEGER DEFAULT 1,
+  inicio TEXT,
+  fin TEXT,
+  avance_real REAL DEFAULT 0,     -- % ejecutado
+  resumen INTEGER DEFAULT 0,
+  hito INTEGER DEFAULT 0,
+  orden INTEGER DEFAULT 0
+);
+
+-- Alineamientos del corredor (LandXML de Civil 3D o InfraWorks) y tramos con su avance
+CREATE TABLE IF NOT EXISTS alineamiento (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL DEFAULT 0,
+  longitud REAL DEFAULT 0,
+  puntos TEXT                    -- JSON [[este, norte], ...]
+);
+CREATE TABLE IF NOT EXISTS tramo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  alineamiento_id INTEGER REFERENCES alineamiento(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL,
+  abs_fin REAL,
+  actividad TEXT,
+  avance REAL DEFAULT 0,          -- % ejecutado
+  fecha TEXT,
+  notas TEXT
+);
+
+-- Seguridad y salud en el trabajo (Decreto 1072 de 2015, Res. 0312 de 2019): inspecciones, permisos, incidentes y accidentes
+CREATE TABLE IF NOT EXISTS sst (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Inspección, Charla, Permiso de trabajo, Entrega de EPP, Verificación seguridad social, Incidente, Accidente
+  frente TEXT,
+  descripcion TEXT,
+  personas INTEGER,
+  dias_incapacidad INTEGER,       -- solo accidentes
+  hallazgo TEXT,
+  accion TEXT,
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Datos mensuales para los indicadores obligatorios (art. 30 Res. 0312)
+CREATE TABLE IF NOT EXISTS sst_mes (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  mes TEXT,                       -- AAAA-MM
+  trabajadores INTEGER,
+  accidentes INTEGER DEFAULT 0,
+  accidentes_mortales INTEGER DEFAULT 0,
+  dias_incapacidad INTEGER DEFAULT 0,
+  dias_cargados INTEGER DEFAULT 0,
+  dias_ausencia INTEGER DEFAULT 0,  -- ausentismo por causa médica
+  dias_programados INTEGER DEFAULT 0,
+  planillas_ok TEXT DEFAULT 'Pendiente', -- verificación PILA / ARL del contratista
+  notas TEXT
+);
+
+-- Control ambiental: seguimiento a las fichas del PAGA o del PMA
+CREATE TABLE IF NOT EXISTS ambiental (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  programa TEXT,                  -- Gestión institucional, Actividades constructivas, Gestión hídrica, Biótico, Maquinaria y transporte, SST, Gestión social
+  ficha TEXT,                     -- código de la ficha en el PAGA/PMA del proyecto
+  actividad TEXT,
+  indicador TEXT,
+  meta REAL,
+  logro REAL,
+  cantidad REAL,                  -- p. ej. m³ de RCD, árboles talados
+  unidad TEXT,
+  permiso TEXT,                   -- aprovechamiento forestal, ocupación de cauce, vertimientos, sitio de disposición
+  hallazgo TEXT,
+  accion TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Plan de Manejo de Tránsito por frente de obra
+CREATE TABLE IF NOT EXISTS pmt (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  frente TEXT,
+  abs_ini TEXT,
+  abs_fin TEXT,
+  cierre TEXT,                    -- Total, Parcial, Por carril, Nocturno
+  interferencia TEXT,             -- Baja, Media, Alta
+  radicado TEXT,                  -- aprobación de la secretaría de tránsito
+  aprobado TEXT,                  -- fecha de aprobación
+  desde TEXT,
+  hasta TEXT,                     -- vigencia
+  dispositivos TEXT,              -- señales, conos, barricadas, canalizadores, paleteros
+  ultima_inspeccion TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  estado TEXT DEFAULT 'En trámite',
+  notas TEXT
+);
+
+-- Gestión social: fichas del PGS (atención a la comunidad, divulgación, predios, mano de obra local, cultura vial)
+CREATE TABLE IF NOT EXISTS social (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  ficha TEXT,
+  tipo TEXT,                      -- PQRS, Reunión de inicio/avance/finalización, Socialización, Acta de vecindad, Mano de obra local, Cultura vial, Visita
+  comunidad TEXT,
+  descripcion TEXT,
+  asistentes INTEGER,
+  responsable TEXT,
+  respuesta TEXT,
+  plazo TEXT,                     -- PQRS: 15 días hábiles (Ley 1755 de 2015)
+  estado TEXT DEFAULT 'Abierto'
+);

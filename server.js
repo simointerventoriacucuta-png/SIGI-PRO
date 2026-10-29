@@ -5,6 +5,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Base } = require('./db.js');
+const integ = require('./integraciones.js');
 
 const PUERTO = process.env.PORT != null ? Number(process.env.PORT) : 4027;
 const RAIZ = __dirname;
@@ -18,10 +19,13 @@ const TABLAS = {
   proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', gasto: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
+  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id',
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
-  proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id']],
+  proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id']],
+  alineamiento: [['tramo', 'alineamiento_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id']],
   acta: [['acta_item', 'acta_id']],
   item: [['item', 'padre_id'], ['acta_item', 'item_id']],
@@ -33,8 +37,8 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia'],
-  especialista: ['acta_item', 'bitacora', 'ensayo'],
+  residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  especialista: ['acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
   administrativo: ['otrosi', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
@@ -216,11 +220,12 @@ async function buscar(proyectoId, texto) {
       out.push({ grupo: c.tipo === 'obra' ? 'Actas parciales' : 'Cuentas de cobro', titulo: `${c.tipo === 'obra' ? 'Acta' : 'Cuenta'} ${a.numero} · ${a.estado}`, abrir: 'acta:' + a.id });
   }
   const TEXTO = { vencimiento: ['descripcion', 'tipo', 'responsable'], correspondencia: ['asunto', 'radicado', 'de', 'para'], personal: ['nombre', 'cargo'],
-    poliza: ['amparo', 'aseguradora', 'numero'], bitacora: ['actividades', 'frente', 'observaciones'], ensayo: ['ensayo', 'item', 'abscisa', 'resultado'] };
-  const NOMBRE = { vencimiento: 'Vencimientos', correspondencia: 'Correspondencia', personal: 'Personal', poliza: 'Pólizas', bitacora: 'Bitácora', ensayo: 'Ensayos' };
+    poliza: ['amparo', 'aseguradora', 'numero'], bitacora: ['actividades', 'frente', 'observaciones'], ensayo: ['ensayo', 'item', 'abscisa', 'resultado'],
+    sst: ['tipo', 'descripcion', 'hallazgo', 'frente'], ambiental: ['programa', 'ficha', 'actividad', 'hallazgo', 'permiso'], social: ['tipo', 'ficha', 'comunidad', 'descripcion'], pmt: ['frente', 'radicado', 'dispositivos'], tarea: ['nombre', 'wbs'] };
+  const NOMBRE = { vencimiento: 'Vencimientos', correspondencia: 'Correspondencia', personal: 'Personal', poliza: 'Pólizas', bitacora: 'Bitácora', ensayo: 'Ensayos', sst: 'SST', ambiental: 'Ambiental', social: 'Social', pmt: 'PMT', tarea: 'Programa de obra' };
   for (const [tabla, cols] of Object.entries(TEXTO)) {
     const filas = await db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ? AND (${cols.map(k => k + ' LIKE ?').join(' OR ')}) LIMIT 10`, proyectoId, ...cols.map(() => like));
-    for (const f of filas) out.push({ grupo: NOMBRE[tabla], titulo: cols.map(k => f[k]).filter(Boolean).join(' · ') + (f.fecha ? ' · ' + f.fecha : ''), abrir: 'tabla:' + tabla });
+    for (const f of filas) out.push({ grupo: NOMBRE[tabla], titulo: cols.map(k => f[k]).filter(Boolean).join(' · ') + (f.fecha ? ' · ' + f.fecha : ''), abrir: tabla === 'tarea' ? 'programa' : 'tabla:' + tabla });
   }
   return out.slice(0, 60);
 }
@@ -236,6 +241,11 @@ async function avisos(proyectoId) {
     out.push({ fecha: p.hasta, tipo: 'Póliza', texto: `${p.amparo || ''} ${p.numero || ''} (${p.contrato || ''}) vence`, abrir: 'tabla:poliza' });
   for (const c of await db.all(`SELECT * FROM correspondencia WHERE proyecto_id = ? AND requiere_respuesta = 'Sí' AND COALESCE(estado, '') NOT IN ('Cerrada', 'Respondida') AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
     out.push({ fecha: c.plazo, tipo: 'Respuesta', texto: `${c.radicado || ''} ${c.asunto || ''}`.trim(), abrir: 'tabla:correspondencia' });
+  for (const [tabla, nombre, campo] of [['sst', 'SST', 'descripcion'], ['ambiental', 'Ambiental', 'actividad'], ['social', 'Social', 'descripcion']])
+    for (const r of await db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ? AND COALESCE(estado, '') <> 'Cerrado' AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
+      out.push({ fecha: r.plazo, tipo: nombre, texto: [r.tipo || r.componente, r.accion || r[campo]].filter(Boolean).join(': '), abrir: 'tabla:' + tabla });
+  for (const m of await db.all(`SELECT * FROM pmt WHERE proyecto_id = ? AND estado <> 'Cerrado' AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, proyectoId, limite))
+    out.push({ fecha: m.hasta, tipo: 'PMT', texto: `Vence la aprobación del PMT ${m.frente || ''} ${m.abs_ini ? '(' + m.abs_ini + ' a ' + (m.abs_fin || '') + ')' : ''}`.trim(), abrir: 'tabla:pmt' });
   for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -291,6 +301,26 @@ ${JSON.stringify(datos)}` }],
   return { texto: resp.content.filter(b => b.type === 'text').map(b => b.text).join('\n') };
 }
 
+// Plazo en días hábiles (sin sábados ni domingos; los festivos se ajustan a mano). PQRS: 15 días, Ley 1755 de 2015
+function diasHabiles(desde, n) {
+  const d = new Date(desde + 'T00:00:00Z');
+  while (n > 0) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) n--; }
+  return d.toISOString().slice(0, 10);
+}
+
+// Indicadores obligatorios del SG-SST (Res. 0312 de 2019, art. 30), por mes
+function indicadoresSST(meses) {
+  return meses.map(m => {
+    const t = m.trabajadores || 0, f = (n, d) => (d ? r2((n / d) * 100) : null);
+    return { mes: m.mes, trabajadores: t,
+      frecuencia: f(m.accidentes || 0, t),                                    // AT en el mes / trabajadores × 100
+      severidad: f((m.dias_incapacidad || 0) + (m.dias_cargados || 0), t),    // (días incapacidad + días cargados) / trabajadores × 100
+      mortalidad: f(m.accidentes_mortales || 0, m.accidentes || 0),           // AT mortales / AT del periodo × 100
+      ausentismo: f(m.dias_ausencia || 0, m.dias_programados || 0),           // días de ausencia / días programados × 100
+      planillas_ok: m.planillas_ok };
+  });
+}
+
 // ---------- HTTP ----------
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
@@ -337,12 +367,91 @@ async function api(req, res, url) {
     return enviar(res, 200, { ok: true });
   }
   if (r0 === 'asistente' && req.method === 'POST') { const b = await leerCuerpo(req); return enviar(res, 200, await asistente(Number(r1), b.mensajes || [], u)); }
+  // ---------- Integraciones ----------
+  const archivo = (nombre, tipo, buf) => { res.setHeader('Content-Disposition', `attachment; filename="${nombre}"`); return enviar(res, 200, Buffer.from(buf), tipo); };
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (r0 === 'xlsx' && r1 === 'presupuesto') { const d = await presupuesto(Number(r2_)); return archivo(`Presupuesto_${d.contrato.tipo}.xlsx`, XLSX, await integ.xlsxPresupuesto(d)); }
+  if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
+  if (r0 === 'docx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.docx`, DOCX, await integ.docxActa(d)); }
+  if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
+    exigir(u, 'item');
+    const b = await leerCuerpo(req), cid = Number(r2_);
+    const filas = await integ.leerPresupuestoXlsx(Buffer.from(b.archivo || '', 'base64'));
+    let orden = (await db.get('SELECT COALESCE(MAX(orden), 0) m FROM item WHERE contrato_id = ?', cid)).m, padre = null;
+    for (const f of filas) {
+      const cap = !f.unidad && !f.cantidad;
+      const r = await db.run('INSERT INTO item (contrato_id, padre_id, tipo, codigo, descripcion, unidad, cantidad, vr_unitario, orden) VALUES (?,?,?,?,?,?,?,?,?)',
+        cid, cap ? null : padre, cap ? 0 : 1, f.codigo || null, f.descripcion, f.unidad || null, f.cantidad, f.vr_unitario, ++orden);
+      if (cap) padre = r.id;
+    }
+    await auditar(u, 'item', null, 'importar-excel', { contrato_id: cid, filas: filas.length });
+    return enviar(res, 200, { ok: true, filas: filas.length });
+  }
+  // Microsoft Project: importar (reemplaza el programa) y exportar
+  if (r0 === 'project' && req.method === 'POST') {
+    exigir(u, 'tarea');
+    const pid = Number(r1), tareas = integ.leerProject((await leerCuerpo(req)).xml || '');
+    for (const t of await db.all('SELECT id FROM tarea WHERE proyecto_id = ?', pid)) await db.run('DELETE FROM tarea WHERE id = ?', t.id);
+    let orden = 0;
+    for (const t of tareas) await db.run('INSERT INTO tarea (proyecto_id, wbs, nombre, nivel, inicio, fin, avance_real, resumen, hito, orden) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      pid, t.wbs, t.nombre, t.nivel, t.inicio, t.fin, t.avance_real, t.resumen, t.hito, ++orden);
+    await auditar(u, 'tarea', null, 'importar-project', { tareas: tareas.length });
+    return enviar(res, 200, { ok: true, tareas: tareas.length });
+  }
+  if (r0 === 'project' && r2_ === 'xml') {
+    const p = await db.get('SELECT nombre FROM proyecto WHERE id = ?', Number(r1));
+    return archivo('Programa_SIGI.xml', 'application/xml', integ.xmlProject(p?.nombre, await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', Number(r1))));
+  }
+  if (r0 === 'programa') {
+    const hoy = q.fecha || new Date().toISOString().slice(0, 10);
+    const tareas = (await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', Number(r1))).map(t => ({ ...t, programado: integ.programado(t, hoy) }));
+    const hojas = tareas.filter(t => !t.resumen);
+    const peso = t => Math.max(1, (Date.parse(t.fin) - Date.parse(t.inicio)) / 86400000 || 1);
+    const tot = hojas.reduce((s, t) => s + peso(t), 0) || 1;
+    const prog = hojas.reduce((s, t) => s + t.programado * peso(t), 0) / tot, real = hojas.reduce((s, t) => s + (t.avance_real || 0) * peso(t), 0) / tot;
+    return enviar(res, 200, { hoy, tareas, programado: r2(prog), real: r2(real), spi: prog ? r2(real / prog) : null });
+  }
+  // Autodesk (LandXML de Civil 3D / InfraWorks) y avance en el plano
+  if (r0 === 'landxml' && req.method === 'POST') {
+    exigir(u, 'alineamiento');
+    const pid = Number(r1), alins = integ.leerLandXML((await leerCuerpo(req)).xml || '');
+    for (const a of alins) await db.run('INSERT INTO alineamiento (proyecto_id, nombre, abs_ini, longitud, puntos) VALUES (?,?,?,?,?)', pid, a.nombre, a.abs_ini, a.longitud, JSON.stringify(a.puntos));
+    await auditar(u, 'alineamiento', null, 'importar-landxml', { alineamientos: alins.map(a => a.nombre) });
+    return enviar(res, 200, { ok: true, alineamientos: alins.length });
+  }
+  if (r0 === 'plano') {
+    const alineamientos = (await db.all('SELECT * FROM alineamiento WHERE proyecto_id = ? ORDER BY id', Number(r1))).map(a => ({ ...a, puntos: JSON.parse(a.puntos || '[]') }));
+    return enviar(res, 200, { alineamientos, tramos: await db.all('SELECT * FROM tramo WHERE proyecto_id = ? ORDER BY alineamiento_id, abs_ini', Number(r1)) });
+  }
+  // Power BI: /api/bi/:proyecto/:conjunto.csv o .json  (en Power BI: Obtener datos → Web)
+  if (r0 === 'bi') {
+    const pid = Number(r1), [conjunto, ext] = String(r2_ || '').split('.');
+    const r = await resumen(pid);
+    const conjuntos = {
+      actas: () => r.contratos.flatMap(c => c.actas.map(a => ({ contrato: c.tipo, numero: a.numero, desde: a.desde, hasta: a.hasta, fecha: a.fecha, estado: a.estado, valor: a.valor, acumulado: a.acumulado, valor_contrato: c.valor_vigente }))),
+      contratos: () => r.contratos.map(c => ({ tipo: c.tipo, numero: c.numero, contratista: c.contratista, valor_original: c.valor, adiciones: c.adiciones, valor_vigente: c.valor_vigente, presupuesto: c.presupuesto, ejecutado: c.ejecutado, gastado: c.gastado, fecha_inicio: c.fecha_inicio, fecha_fin_vigente: c.fecha_fin_vigente })),
+      items: async () => { const out = []; for (const c of r.contratos) { const ult = c.actas[c.actas.length - 1]; const d = ult ? await detalleActa(ult.id) : null;
+        for (const f of (d ? d.filas : (await presupuesto(c.id)).items).filter(x => x.tipo === 1)) out.push({ contrato: c.tipo, codigo: f.codigo, descripcion: f.descripcion, unidad: f.unidad, cantidad: f.cantidad, vr_unitario: f.vr_unitario, acumulado: f.acumulado || 0, saldo: f.saldo ?? f.cantidad, pct: f.pct || 0 }); } return out; },
+      gastos: () => db.all('SELECT g.fecha, g.descripcion, g.proveedor, g.valor, g.pagado FROM gasto g JOIN contrato c ON c.id = g.contrato_id WHERE c.proyecto_id = ?', pid),
+      programa: async () => (await db.all('SELECT * FROM tarea WHERE proyecto_id = ?', pid)).map(t => ({ wbs: t.wbs, nombre: t.nombre, inicio: t.inicio, fin: t.fin, avance_real: t.avance_real, programado: integ.programado(t, r.hoy) })),
+      tramos: () => db.all('SELECT nombre, abs_ini, abs_fin, actividad, avance, fecha FROM tramo WHERE proyecto_id = ?', pid),
+      sst: () => db.all('SELECT * FROM sst WHERE proyecto_id = ?', pid), sst_indicadores: async () => indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', pid)), pmt: () => db.all('SELECT * FROM pmt WHERE proyecto_id = ?', pid), ambiental: () => db.all('SELECT * FROM ambiental WHERE proyecto_id = ?', pid), social: () => db.all('SELECT * FROM social WHERE proyecto_id = ?', pid),
+    };
+    if (!conjuntos[conjunto]) return enviar(res, 200, { conjuntos: Object.keys(conjuntos).map(k => `/api/bi/${pid}/${k}.csv`) });
+    const filas = await conjuntos[conjunto]();
+    return ext === 'json' ? enviar(res, 200, filas) : enviar(res, 200, integ.csv(filas), 'text/csv; charset=utf-8');
+  }
+  if (r0 === 'sst-indicadores') return enviar(res, 200, indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', Number(r1))));
   if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
   if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 
   // Sincronización
   if (r0 === 'sync' && req.method === 'GET') { const cfg = db.config(); return enviar(res, 200, { ...db.estado, url: cfg?.url || null }); }
   if (r0 === 'sync' && req.method !== 'GET') exigir(u, 'sync');
+  if (r0 === 't' && r1 === 'alineamiento' && req.method === 'GET') {
+    // Sin la geometría (puede ser grande); se lee completa en /api/plano
+    return enviar(res, 200, await db.all('SELECT id, proyecto_id, nombre, abs_ini, longitud FROM alineamiento WHERE proyecto_id = ?', Number(q.proyecto_id)));
+  }
   if (r0 === 'sync' && r1 === 'probar') { const b = await leerCuerpo(req); return enviar(res, 200, await Base.probar(b.url, b.token)); }
   if (r0 === 'sync' && r1 === 'activar') { const b = await leerCuerpo(req); const r = await db.activarNube(b.url, b.token, ESQUEMA); await iniciar(); await auditar(u, 'sync', null, 'activar', { url: b.url }); return enviar(res, 200, r); }
   if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); return enviar(res, 200, { ok: true }); }
@@ -403,7 +512,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
       const filtro = padre && q[padre] ? ` WHERE ${padre} = ?` : '';
-      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC' }[tabla] || 'id';
+      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', ambiental: 'fecha DESC', pmt: 'id', social: 'fecha DESC' }[tabla] || 'id';
       return enviar(res, 200, await db.all(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`, ...(filtro ? [Number(q[padre])] : [])));
     }
     if (req.method !== 'GET') exigir(u, tabla);
@@ -412,6 +521,7 @@ async function api(req, res, url) {
       if (tabla === 'item' && d.orden == null) d.orden = (await db.get('SELECT COALESCE(MAX(orden), 0) + 1 m FROM item WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta') await validarEstado(u, null, d);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
+      if (tabla === 'social' && d.tipo === 'PQRS' && !d.plazo) d.plazo = diasHabiles(d.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       const k = Object.keys(d);
@@ -425,6 +535,7 @@ async function api(req, res, url) {
       const antes = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id);
       if (!antes) throw new Rechazo(404, 'No existe');
       if (tabla === 'acta') await validarEstado(u, antes, d);
+      if (tabla === 'social' && d.tipo === 'PQRS' && !antes.plazo && !d.plazo) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (k.length) await db.run(`UPDATE ${tabla} SET ${k.map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
       const cambio = diferencia(antes, d);
@@ -456,8 +567,10 @@ const servidor = http.createServer(async (req, res) => {
   }
 });
 // Al arrancar desde la app de escritorio (main.js) se usa un puerto libre que se lee de aquí
-module.exports = iniciar().then(() => new Promise(ok => servidor.listen(PUERTO, '127.0.0.1', () => {
-  const p = servidor.address().port;
-  console.log(`SIGI listo en http://localhost:${p} (base: ${db.estado.modo})`);
-  ok(p);
-})));
+module.exports = iniciar().then(() => new Promise((ok, mal) => {
+  const listo = () => { const p = servidor.address().port; console.log(`SIGI listo en http://localhost:${p} (base: ${db.estado.modo})`); ok(p); };
+  servidor.once('error', e => {
+    if (e.code === 'EADDRINUSE' && process.env.SIGI_PUERTO_LIBRE) servidor.listen(0, '127.0.0.1', listo); else mal(e);
+  });
+  servidor.listen(PUERTO, '127.0.0.1', listo);
+}));
