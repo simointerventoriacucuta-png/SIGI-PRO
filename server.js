@@ -77,6 +77,8 @@ const QUIEN_RQ = { Aprobada: ['director'], Rechazada: ['director'], Atendida: ['
 const rqCerrada = r => !!r && !['Borrador', 'Solicitada'].includes(r.estado);
 
 class Rechazo extends Error { constructor(codigo, msg) { super(msg); this.codigo = codigo; } }
+// Un archivo importado que no se puede leer es un error del archivo (400), no del servidor
+const archivoMalo = leer => { try { return leer(); } catch (e) { throw new Rechazo(400, e.message); } };
 
 async function usuarioDe(req) {
   const id = Number(req.headers['x-usuario']);
@@ -417,7 +419,7 @@ async function avisos(proyectoId) {
     out.push({ fecha: m.vence_emisiones, tipo: 'Emisiones', texto: `Certificado de emisiones de ${m.equipo || ''} ${m.placa || ''}`.trim(), abrir: 'tabla:maquinaria' });
   for (const c of await db.all(`SELECT * FROM amb_chequeo WHERE proyecto_id = ? AND cumple = 'No' AND COALESCE(estado, '') <> 'Cerrado' AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
     out.push({ fecha: c.plazo, tipo: 'Ambiental', texto: `${c.aspecto || ''}: ${c.accion || c.observacion || ''}`, abrir: 'tabla:amb_chequeo' });
-  for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
+  for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND COALESCE(o.polizas_ajustadas, '') <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
   for (const r of await db.all(`SELECT * FROM requisicion WHERE proyecto_id = ? AND estado IN ('Solicitada', 'Aprobada') ORDER BY fecha`, proyectoId))
     out.push({ fecha: r.fecha || iso(hoy), tipo: 'RQ', texto: r.estado === 'Solicitada' ? `RQ ${r.numero} pendiente de aprobar (${r.solicitante || ''})` : `RQ ${r.numero} aprobada, pendiente de atender`, abrir: 'requisiciones' });
@@ -1342,7 +1344,7 @@ async function api(req, res, url) {
   if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
     exigir(u, 'item');
     const b = await leerCuerpo(req), cid = Number(r2_);
-    const filas = await integ.leerPresupuestoXlsx(Buffer.from(b.archivo || '', 'base64'));
+    const filas = await integ.leerPresupuestoXlsx(Buffer.from(b.archivo || '', 'base64')).catch(e => { throw new Rechazo(400, 'No se pudo leer el Excel: ' + e.message); });
     let orden = (await db.get('SELECT COALESCE(MAX(orden), 0) m FROM item WHERE contrato_id = ?', cid)).m, padre = null;
     for (const f of filas) {
       const cap = !f.unidad && !f.cantidad;
@@ -1356,7 +1358,7 @@ async function api(req, res, url) {
   // Microsoft Project: importar (reemplaza el programa) y exportar
   if (r0 === 'project' && req.method === 'POST') {
     exigir(u, 'tarea');
-    const pid = Number(r1), tareas = integ.leerProject((await leerCuerpo(req)).xml || '');
+    const pid = Number(r1), xml = (await leerCuerpo(req)).xml || '', tareas = archivoMalo(() => integ.leerProject(xml));
     for (const t of await db.all('SELECT id FROM tarea WHERE proyecto_id = ?', pid)) await db.run('DELETE FROM tarea WHERE id = ?', t.id);
     let orden = 0;
     for (const t of tareas) await db.run('INSERT INTO tarea (proyecto_id, wbs, nombre, nivel, inicio, fin, avance_real, resumen, hito, orden) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -1382,7 +1384,7 @@ async function api(req, res, url) {
   // Autodesk (LandXML de Civil 3D / InfraWorks) y avance en el plano
   if (r0 === 'landxml' && req.method === 'POST') {
     exigir(u, 'alineamiento');
-    const pid = Number(r1), alins = integ.leerLandXML((await leerCuerpo(req)).xml || '');
+    const pid = Number(r1), xml = (await leerCuerpo(req)).xml || '', alins = archivoMalo(() => integ.leerLandXML(xml));
     for (const a of alins) await db.run('INSERT INTO alineamiento (proyecto_id, nombre, abs_ini, longitud, puntos) VALUES (?,?,?,?,?)', pid, a.nombre, a.abs_ini, a.longitud, JSON.stringify(a.puntos));
     await auditar(u, 'alineamiento', null, 'importar-landxml', { alineamientos: alins.map(a => a.nombre) });
     return enviar(res, 200, { ok: true, alineamientos: alins.length });
