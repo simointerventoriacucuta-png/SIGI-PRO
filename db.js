@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createClient } = require('@libsql/client');
 
-const TABLAS_ORDEN = ['proyecto', 'contrato', 'item', 'otrosi', 'otrosi_item', 'acta', 'acta_item', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo', 'suspension', 'liquidacion', 'usuario', 'auditoria', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'];
+const TABLAS_ORDEN = ['proyecto', 'contrato', 'item', 'otrosi', 'otrosi_item', 'acta', 'acta_item', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo', 'suspension', 'liquidacion', 'usuario', 'auditoria', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social', 'adjunto', 'adjunto_dato'];
 const archivoUrl = p => 'file:' + p.replace(/\\/g, '/');
 const plano = v => (typeof v === 'bigint' ? Number(v) : v);
 const filaPlana = r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, plano(v)]));

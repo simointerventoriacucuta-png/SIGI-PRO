@@ -46,7 +46,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
 12. Aportes de M1:
     - **Memoria de cantidades por ítem y acta:** abscisa inicial y final, costado, largo, ancho, espesor y piezas, o una fórmula; con fotos y estado medida → verificada → aprobada.
     - **Importador de Excel** que deja escoger el rango y asignar columnas, y reconoce capítulos.
-    - **Adjuntos por registro** en actas, mediciones, ensayos, pólizas y oficios.
+    - ✅ **Adjuntos por registro** (hecho: 📎 en pólizas, actas, otrosíes, suspensiones, gastos, tramos, SST, ambiental, social, PMT, bitácora, ensayos, correspondencia y contratos; registro fotográfico con fecha, frente, abscisa, punto fijo y GPS, incluido en el informe mensual).
     - Valor en letras en las actas.
     - Semáforo de aprobación por fila.
 13. ✅ **Integraciones con otras aplicaciones** (hecho: Excel .xlsx, acta en Word con valor en letras, Project XML, LandXML con avance en el plano, datos CSV/JSON para Power BI):

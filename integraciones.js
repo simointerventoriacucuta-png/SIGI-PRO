@@ -165,6 +165,18 @@ async function docxActa(d) {
 }
 
 // Informe mensual de interventoría (datos de informeMensual en server.js)
+// Fotos de dos en dos, con su fecha, abscisa y descripción
+function fotosInforme(fotos) {
+  const { Paragraph, TextRun, ImageRun, Table, TableRow, TableCell, WidthType, BorderStyle } = docx;
+  const sin = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+  const celda = f => new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, borders: { top: sin, bottom: sin, left: sin, right: sin }, children: f ? [
+    new Paragraph({ children: [new ImageRun({ type: f.tipo_mime === 'image/png' ? 'png' : 'jpg', data: f.datos, transformation: { width: 300, height: 200 } })] }),
+    new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: [f.fecha, f.abscisa, f.frente].filter(Boolean).join(' · ') + (f.descripcion ? ': ' + f.descripcion : ''), size: 16 })] })] : [new Paragraph('')] });
+  const filas = [];
+  for (let i = 0; i < fotos.length; i += 2) filas.push(new TableRow({ children: [celda(fotos[i]), celda(fotos[i + 1])] }));
+  return [new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: filas })];
+}
+
 async function docxInforme(d) {
   const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, PageBreak } = docx;
   const p = (texto, opc = {}) => new Paragraph({ spacing: { after: 120 }, alignment: opc.centro ? AlignmentType.CENTER : AlignmentType.LEFT, children: [new TextRun({ text: String(texto ?? ''), bold: !!opc.negrita, size: opc.size || 20 })] });
@@ -227,7 +239,10 @@ async function docxInforme(d) {
     h('9. Vencimientos y pendientes'),
     tabla(['Fecha', 'Tipo', 'Descripción', 'Responsable', 'Estado'], d.vencimientos.map(x => [(x.fecha || '') + (x.fecha && x.fecha < d.hoy ? ' (vencido)' : ''), x.tipo || '', x.descripcion || '', x.responsable || '', x.estado || '']), 'No hay pendientes.'),
 
-    h('10. Conclusiones y recomendaciones'),
+    h('10. Registro fotográfico'),
+    ...(d.fotos || []).length ? fotosInforme(d.fotos) : [p('Sin fotos registradas en el periodo.')],
+
+    h('11. Conclusiones y recomendaciones'),
     ...Array(6).fill(0).map(() => p('______________________________________________________________________________')),
     p(''), p(''), p(''),
     p('______________________________', { centro: true }), p(d.director, { centro: true, negrita: true }), p('Director de interventoría', { centro: true }),

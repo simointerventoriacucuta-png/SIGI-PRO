@@ -20,13 +20,14 @@ const TABLAS = {
   suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
-  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id',
+  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id',
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
-    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id']],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
+  adjunto: [['adjunto_dato', 'adjunto_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id'], ['suspension', 'contrato_id'], ['liquidacion', 'contrato_id']],
   acta: [['acta_item', 'acta_id']],
   otrosi: [['otrosi_item', 'otrosi_id']],
@@ -39,9 +40,9 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  especialista: ['acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  administrativo: ['otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
+  residente: ['adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  especialista: ['adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  administrativo: ['adjunto', 'otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
 const puede = (u, recurso) => !!u && (PERMISOS[u.rol] === '*' || (PERMISOS[u.rol] || []).includes(recurso));
@@ -104,12 +105,14 @@ async function iniciar() {
 
 async function borrar(tabla, id) {
   for (const [hijo, col] of HIJOS[tabla] || []) {
-    if (hijo === 'acta_item') { await db.run(`DELETE FROM acta_item WHERE ${col} = ?`, id); continue; }
+    if (hijo === 'acta_item' || hijo === 'adjunto_dato') { await db.run(`DELETE FROM ${hijo} WHERE ${col} = ?`, id); continue; }
     for (const h of await db.all(`SELECT id FROM ${hijo} WHERE ${col} = ?`, id)) await borrar(hijo, h.id);
   }
   if (tabla === 'otrosi') await db.run('UPDATE item SET otrosi_id = NULL WHERE otrosi_id = ?', id);
   if (tabla === 'gasto' || tabla === 'item') await db.run('UPDATE gasto SET item_id = NULL WHERE item_id = ?', tabla === 'item' ? id : -1);
   await db.run(`DELETE FROM ${tabla} WHERE id = ?`, id);
+  // Los adjuntos del registro borrado
+  if (tabla !== 'adjunto') for (const a of await db.all('SELECT id FROM adjunto WHERE tabla = ? AND registro_id = ?', tabla, id)) await borrar('adjunto', a.id);
 }
 
 const r2 = v => Math.round((v + Number.EPSILON) * 100) / 100;
@@ -403,7 +406,10 @@ async function informeMensual(pid, mes) {
     pmt: await db.all('SELECT * FROM pmt WHERE proyecto_id = ? AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY frente', pid, fin, ini),
     social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
     vencimientos: r.vencimientos,
-    director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría' };
+    director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría',
+    // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
+    fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
+      .map(async a => ({ ...a, datos: Buffer.from((await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', a.id)).datos) }))) };
 }
 
 // ---------- HTTP ----------
@@ -520,6 +526,37 @@ async function api(req, res, url) {
     return ext === 'json' ? enviar(res, 200, filas) : enviar(res, 200, integ.csv(filas), 'text/csv; charset=utf-8');
   }
   if (r0 === 'sst-indicadores') return enviar(res, 200, indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', Number(r1))));
+  // ---------- Adjuntos y registro fotográfico ----------
+  if (r0 === 'adjuntos') {
+    const f = ['proyecto_id = ?'], a = [Number(r1)];
+    for (const k of ['tabla', 'registro_id', 'categoria']) if (q[k]) { f.push(k + ' = ?'); a.push(k === 'registro_id' ? Number(q[k]) : q[k]); }
+    if (q.mes) { f.push('substr(fecha, 1, 7) = ?'); a.push(q.mes); }
+    return enviar(res, 200, await db.all(`SELECT * FROM adjunto WHERE ${f.join(' AND ')} ORDER BY fecha DESC, id DESC`, ...a));
+  }
+  // Cuántos adjuntos tiene cada registro de una tabla: { registro_id: n }
+  if (r0 === 'adjuntos-conteo') return enviar(res, 200, Object.fromEntries((await db.all('SELECT registro_id, COUNT(*) n FROM adjunto WHERE proyecto_id = ? AND tabla = ? GROUP BY registro_id', Number(r1), q.tabla)).map(r => [r.registro_id, r.n])));
+  if (r0 === 'adjunto' && r2_ === 'archivo') {
+    const a = await db.get('SELECT * FROM adjunto WHERE id = ?', Number(r1)), d = await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', Number(r1));
+    if (!a || !d) return enviar(res, 404, { error: 'No existe' });
+    res.setHeader('Content-Disposition', `${q.descargar ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(a.nombre || 'archivo')}`);
+    return enviar(res, 200, Buffer.from(d.datos), a.tipo_mime || 'application/octet-stream');
+  }
+  if (r0 === 'adjunto' && req.method === 'POST') {
+    const b = await leerCuerpo(req);
+    // Quien puede modificar el registro puede adjuntarle archivos; el registro fotográfico general, quien lleve bitácora
+    exigir(u, !b.tabla || b.tabla === 'proyecto' ? 'bitacora' : b.tabla === 'acta' ? 'acta_item' : b.tabla);
+    if (b.tabla === 'acta' && b.registro_id) await actaEditable(Number(b.registro_id));
+    const datos = Buffer.from(String(b.datos || ''), 'base64');
+    if (!datos.length) throw new Rechazo(400, 'El archivo está vacío');
+    if (datos.length > 20 * 1024 * 1024) throw new Rechazo(400, 'El archivo pasa de 20 MB');
+    const r = await db.run(`INSERT INTO adjunto (proyecto_id, tabla, registro_id, categoria, nombre, tipo_mime, tamano, fecha, frente, abscisa, punto, descripcion, lat, lon, usuario, creado)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, Number(b.proyecto_id), b.tabla || 'proyecto', b.registro_id ? Number(b.registro_id) : null,
+      b.categoria || (/^image\//.test(b.tipo_mime) ? 'Foto' : 'Documento'), b.nombre, b.tipo_mime, datos.length, b.fecha || new Date().toISOString().slice(0, 10),
+      b.frente || null, b.abscisa || null, b.punto || null, b.descripcion || null, b.lat ?? null, b.lon ?? null, u.nombre, new Date().toISOString());
+    await db.run('INSERT INTO adjunto_dato (adjunto_id, datos) VALUES (?, ?)', r.id, datos);
+    await auditar(u, 'adjunto', r.id, 'crear', { tabla: b.tabla, registro_id: b.registro_id, nombre: b.nombre, tamano: datos.length });
+    return enviar(res, 200, await db.get('SELECT * FROM adjunto WHERE id = ?', r.id));
+  }
   if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
   if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 

@@ -92,7 +92,7 @@ const CINTA = {
     ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa]]],
     DOC_ACTA,
     ['Programa y plano', [['Programa de obra (Project)', 'balance', () => abrir('programa')], ['Avance en el plano', 'mayores', () => abrir('plano')]]],
-    ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')]]],
+    ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')], ['Registro fotográfico', 'datos', () => abrir('fotos')]]],
     ['Análisis', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores', 'mayores', ab('obra', 'mayores')]]],
   ]],
   interventoria: ['Contrato de interventoría', [
@@ -158,7 +158,7 @@ function pintarArbol() {
   if (!E.res) return;
   const r = E.res, ob = contrato('obra'), it = contrato('interventoria');
   const n = (clave, texto, nivel = 0, cuenta = '', carpeta = false) => `<div class="nodo ${carpeta ? 'carpeta' : ''} ${E.activo === clave ? 'activo' : ''}" style="--nivel:${nivel}" ${clave ? `data-k="${clave}"` : ''}>${texto}<span class="cuenta">${cuenta}</span></div>`;
-  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI');
+  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI') + n('fotos', '📷 Registro fotográfico');
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
     h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length) + n('suspensiones:' + ob.id, '⏸️ Suspensiones', 0, ob.suspendido ? 'suspendido' : ob.suspensiones.length) + n('liquidacion:' + ob.id, '🏁 Liquidación', 0, ob.liquidacion?.estado || '');
@@ -189,7 +189,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI',
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico',
     suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
@@ -229,8 +229,9 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
     await vista(cont, x);
+    marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
 async function refrescar() { E.res = await api('resumen/' + E.pid); pintarCampana(); pintarLateral(); await pintarDocs(); estadoProyecto(); pintarSync(); }
@@ -320,6 +321,7 @@ async function vProyecto(cont) { formulario(cont, 'Datos del proyecto', CAMPOS_P
 async function vContrato(cont, tipo) {
   const c = contrato(tipo); if (!c) return (cont.innerHTML = '<div class="vacio">No hay contrato de este tipo.</div>');
   formulario(cont, 'Contrato de ' + (tipo === 'obra' ? 'obra (vigilado)' : 'interventoría'), CAMPOS_CONTRATO, await api('t/contrato/' + c.id), 'contrato');
+  cont.insertAdjacentHTML('afterbegin', `<div class="barra-herr"><span class="esp"></span><button class="btn clip" data-adj="contrato:${c.id}">📎 Documentos del contrato</button></div>`);
 }
 
 function tablaTotales(t) {
@@ -400,7 +402,7 @@ async function vActa(cont, id) {
   // Acta aprobada o posterior: celdas de solo lectura
   const celda = bloq ? (v, c, tipo = 'text', extra = '') => `<td class="${tipo === 'num' ? 'num' : ''}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>` : window.celda;
   const t = d.totales;
-  cont.innerHTML = `<h2>${esObra ? 'Acta parcial de obra' : 'Cuenta de cobro de interventoría'} N.º ${a.numero}</h2>
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${esObra ? 'Acta parcial de obra' : 'Cuenta de cobro de interventoría'} N.º ${a.numero}</h2><span class="esp"></span><button class="btn clip" data-adj="acta:${a.id}">📎 Soportes y fotos</button></div>
   <p class="sub">${esc(d.contrato.contratista || '')} · contrato ${esc(d.contrato.numero || '')}</p>
   <table class="grilla" id="g-acta-cab" style="max-width:900px;margin-bottom:10px"><tbody><tr>
     <th>Periodo desde</th>${celda(a.desde, 'desde', 'date')}<th>Hasta</th>${celda(a.hasta, 'hasta', 'date')}<th>Fecha del acta</th>${celda(a.fecha, 'fecha', 'date')}</tr></tbody></table>
@@ -445,7 +447,7 @@ async function vOtrosis(cont, cid) {
     <div class="tarjeta"><div class="et">Plazo</div><div class="va">${esc(c.plazo || '—')}${c.prorroga_dias ? ' + ' + c.prorroga_dias + ' d' : ''}</div><div class="no">Terminación vigente: ${fechaLarga(c.fecha_fin_vigente) || '—'}</div></div>
   </div>
   <div class="grilla-cont"><table class="grilla" id="g-otrosi"><thead><tr><th>N.º</th><th>Fecha</th><th>Tipo</th><th class="num">Valor adicionado</th><th class="num">Días de prórroga</th><th>Objeto / justificación</th><th>Estado</th><th>¿Pólizas ajustadas?</th><th></th></tr></thead><tbody>
-  ${c.otrosis.map(o => `<tr data-id="${o.id}"><td>${o.numero}</td>${celda(o.fecha, 'fecha', 'date')}${celda(o.tipo, 'tipo', 'select', 'data-op="Adición|Prórroga|Adición y prórroga|Modificación|Suspensión"')}${celda(o.valor, 'valor', 'num')}${celda(o.dias, 'dias', 'num')}${celda(o.objeto, 'objeto')}${celda(o.estado, 'estado', 'select', 'data-op="En trámite|Firmado|Anulado"')}${celda(o.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"', )}<td><button class="btn" data-borrar="${o.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin otrosíes</td></tr>'}
+  ${c.otrosis.map(o => `<tr data-id="${o.id}"><td>${o.numero}</td>${celda(o.fecha, 'fecha', 'date')}${celda(o.tipo, 'tipo', 'select', 'data-op="Adición|Prórroga|Adición y prórroga|Modificación|Suspensión"')}${celda(o.valor, 'valor', 'num')}${celda(o.dias, 'dias', 'num')}${celda(o.objeto, 'objeto')}${celda(o.estado, 'estado', 'select', 'data-op="En trámite|Firmado|Anulado"')}${celda(o.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"', )}<td class="acciones"><button class="btn clip" data-adj="otrosi:${o.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${o.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin otrosíes</td></tr>'}
   </tbody></table></div>
   <p class="sub">Solo los otrosíes en estado Firmado suman al valor y al plazo vigentes. Mientras las pólizas no estén ajustadas, la campana lo recuerda.</p>
   <div id="o-cant"></div>`;
@@ -615,7 +617,7 @@ async function vPlano(cont) {
     <span class="leyenda"><i style="background:#bdbdbd"></i>Sin iniciar <i style="background:#f9a825"></i>En ejecución <i style="background:#7cb342"></i>≥ 50 % <i style="background:#2e7d32"></i>Terminado</span></p>
   ${svg}
   <div class="grilla-cont"><table class="grilla" id="g-tramos"><thead><tr><th>Eje</th><th>Tramo</th><th class="num">Abscisa inicial (m)</th><th class="num">Abscisa final (m)</th><th>Actividad</th><th class="num">Avance %</th><th>Fecha</th><th>Notas</th><th></th></tr></thead><tbody>
-  ${d.tramos.map(t => `<tr data-id="${t.id}">${celda(t.alineamiento_id, 'alineamiento_id', 'select', `data-op="${opAl}"`).replace(/>\d+<\/td>$/, `>${esc(d.alineamientos.find(a => a.id === t.alineamiento_id)?.nombre || '')}</td>`)}${celda(t.nombre, 'nombre')}${celda(t.abs_ini, 'abs_ini', 'num')}${celda(t.abs_fin, 'abs_fin', 'num')}${celda(t.actividad, 'actividad')}${celda(t.avance, 'avance', 'num')}${celda(t.fecha, 'fecha', 'date')}${celda(t.notas, 'notas')}<td><button class="btn" data-borrar="${t.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin tramos</td></tr>'}
+  ${d.tramos.map(t => `<tr data-id="${t.id}">${celda(t.alineamiento_id, 'alineamiento_id', 'select', `data-op="${opAl}"`).replace(/>\d+<\/td>$/, `>${esc(d.alineamientos.find(a => a.id === t.alineamiento_id)?.nombre || '')}</td>`)}${celda(t.nombre, 'nombre')}${celda(t.abs_ini, 'abs_ini', 'num')}${celda(t.abs_fin, 'abs_fin', 'num')}${celda(t.actividad, 'actividad')}${celda(t.avance, 'avance', 'num')}${celda(t.fecha, 'fecha', 'date')}${celda(t.notas, 'notas')}<td class="acciones"><button class="btn clip" data-adj="tramo:${t.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${t.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin tramos</td></tr>'}
   </tbody></table></div>`;
   const g = $('#g-tramos');
   editable(g, (td, v) => api('t/tramo/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'alineamiento_id' ? Number(v) : v }));
@@ -664,7 +666,7 @@ async function vSuspensiones(cont, cid) {
     <div class="tarjeta"><div class="et">Terminación vigente</div><div class="va">${fechaLarga(c.fecha_fin_vigente) || '—'}</div><div class="no">Original ${fechaLarga(c.fecha_fin) || '—'} + ${c.prorroga_dias} d de prórroga + ${c.dias_suspendidos} d suspendidos</div></div>
   </div>
   <div class="grilla-cont"><table class="grilla" id="g-susp"><thead><tr><th>N.º</th><th>Fecha suspensión</th><th>Fecha reinicio</th><th class="num">Días</th><th>Motivo</th><th>Acta</th><th>Estado</th><th>¿Pólizas ajustadas?</th><th></th></tr></thead><tbody>
-  ${c.suspensiones.map(x => `<tr data-id="${x.id}"><td>${x.numero}</td>${celda(x.fecha_suspension, 'fecha_suspension', 'date')}${celda(x.fecha_reinicio, 'fecha_reinicio', 'date')}<td class="num">${diasSusp(x)}</td>${celda(x.motivo, 'motivo')}${celda(x.acta, 'acta')}${celda(x.estado, 'estado', 'select', 'data-op="Suspendido|Reiniciado"')}${celda(x.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"')}<td><button class="btn" data-borrar="${x.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin suspensiones</td></tr>'}
+  ${c.suspensiones.map(x => `<tr data-id="${x.id}"><td>${x.numero}</td>${celda(x.fecha_suspension, 'fecha_suspension', 'date')}${celda(x.fecha_reinicio, 'fecha_reinicio', 'date')}<td class="num">${diasSusp(x)}</td>${celda(x.motivo, 'motivo')}${celda(x.acta, 'acta')}${celda(x.estado, 'estado', 'select', 'data-op="Suspendido|Reiniciado"')}${celda(x.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"')}<td class="acciones"><button class="btn clip" data-adj="suspension:${x.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${x.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin suspensiones</td></tr>'}
   </tbody></table></div>
   <p class="sub">Mientras siga suspendido, los días se cuentan hasta hoy. Al reiniciar hay que ajustar las pólizas; la campana lo recuerda, y también si la suspensión pasa de 30 días.</p>`;
   const g = $('#g-susp');
@@ -697,6 +699,90 @@ async function vLiquidacion(cont, cid) {
     c.liquidacion = await api('t/liquidacion', 'POST', { contrato_id: c.id, valor_ejecutado: c.ejecutado, ...d });
     return c.liquidacion;
   });
+}
+
+// ---------- Adjuntos y registro fotográfico ----------
+// Cualquier botón con data-adj="tabla:id" abre los adjuntos de ese registro
+document.addEventListener('click', e => { const b = e.target.closest('[data-adj]'); if (b) { e.stopPropagation(); const [t, id] = b.dataset.adj.split(':'); dialogoAdjuntos(t, Number(id)); } });
+async function marcarAdjuntos(cont) {
+  const porTabla = {};
+  cont.querySelectorAll('[data-adj]').forEach(b => { const t = b.dataset.adj.split(':')[0]; (porTabla[t] = porTabla[t] || []).push(b); });
+  for (const [t, botones] of Object.entries(porTabla)) {
+    const n = await api(`adjuntos-conteo/${E.pid}?tabla=${t}`);
+    for (const b of botones) { const k = n[b.dataset.adj.split(':')[1]]; b.classList.toggle('con', !!k); b.dataset.n = k || ''; }
+  }
+}
+const tamano = n => (n > 1048576 ? fmt(n / 1048576, 1) + ' MB' : fmt(n / 1024, 0) + ' kB');
+// Las fotos se reducen a 1920 px (JPEG) antes de subirlas, para no llenar la base
+function prepararArchivo(f) {
+  return new Promise(ok => {
+    const r = new FileReader();
+    if (!/^image\/(jpeg|png|webp)/.test(f.type) || f.size < 600 * 1024) { r.onload = () => ok({ nombre: f.name, tipo_mime: f.type || 'application/octet-stream', datos: String(r.result).split(',')[1] }); return r.readAsDataURL(f); }
+    r.onload = () => { const img = new Image(); img.onload = () => {
+      const k = Math.min(1, 1920 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      ok({ nombre: f.name.replace(/\.\w+$/, '') + '.jpg', tipo_mime: 'image/jpeg', datos: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+    }; img.src = r.result; };
+    r.readAsDataURL(f);
+  });
+}
+const ubicacion = () => new Promise(ok => { if (!navigator.geolocation) return ok({}); navigator.geolocation.getCurrentPosition(p => ok({ lat: p.coords.latitude, lon: p.coords.longitude }), () => ok({}), { timeout: 5000 }); });
+function miniatura(a) {
+  const url = `/api/adjunto/${a.id}/archivo`;
+  return `<div class="adj" data-id="${a.id}">${a.categoria === 'Foto' || /^image\//.test(a.tipo_mime) ? `<a href="${url}" target="_blank"><img src="${url}" loading="lazy" alt=""></a>` : `<a class="doc" href="${url}" target="_blank">📄<span>${esc((a.nombre || '').split('.').pop().toUpperCase())}</span></a>`}
+    <div class="adj-info"><b title="${esc(a.nombre)}">${esc(a.descripcion || a.nombre)}</b><span>${fechaLarga(a.fecha)}${a.abscisa ? ' · ' + esc(a.abscisa) : ''}${a.frente ? ' · ' + esc(a.frente) : ''}${a.punto ? ' · punto ' + esc(a.punto) : ''}</span>
+    <span>${tamano(a.tamano)} · ${esc(a.usuario || '')}${a.lat ? ` · <a href="https://www.google.com/maps?q=${a.lat},${a.lon}" target="_blank">📍 mapa</a>` : ''}</span>
+    <span><a href="${url}?descargar=1">Descargar</a> · <a href="#" data-quitar="${a.id}">Eliminar</a></span></div></div>`;
+}
+function formularioSubir(foto) {
+  return `<div class="subir"><select id="adj-cat"><option ${foto ? '' : 'selected'}>Documento</option><option ${foto ? 'selected' : ''}>Foto</option></select>
+    <input id="adj-fecha" type="date" value="${hoyISO()}" title="Fecha"><input id="adj-frente" placeholder="Frente"><input id="adj-abscisa" placeholder="Abscisa (K0+000)"><input id="adj-punto" placeholder="Punto fijo" title="Para fotos comparables en el tiempo">
+    <input id="adj-desc" placeholder="Descripción" style="flex:1;min-width:180px"><label class="sub"><input type="checkbox" id="adj-gps"> Ubicación</label>
+    <label class="btn prim">Elegir archivos…<input id="adj-archivos" type="file" multiple hidden accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.dwg,.dxf,.xml,.kmz,.zip"></label></div>`;
+}
+async function subirArchivos(lista, tabla, registroId) {
+  const extra = { proyecto_id: E.pid, tabla, registro_id: registroId, categoria: $('#adj-cat').value, fecha: $('#adj-fecha').value, frente: $('#adj-frente').value, abscisa: $('#adj-abscisa').value, punto: $('#adj-punto').value, descripcion: $('#adj-desc').value };
+  if ($('#adj-gps').checked) Object.assign(extra, await ubicacion());
+  let n = 0;
+  for (const f of lista) {
+    aviso(`Subiendo ${++n} de ${lista.length}: ${f.name}`);
+    try { await api('adjunto', 'POST', { ...extra, ...(await prepararArchivo(f)), categoria: /^image\//.test(f.type) ? extra.categoria : 'Documento' }); } catch (e) { aviso('Error: ' + e.message); return; }
+  }
+  aviso(`${n} archivo(s) subido(s)`);
+}
+async function dialogoAdjuntos(tabla, id) {
+  const pintar = async () => {
+    const lista = await api(`adjuntos/${E.pid}?tabla=${tabla}&registro_id=${id}`);
+    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', 'ambiental', 'social', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
+      <div class="adjuntos">${lista.map(miniatura).join('') || '<p class="sub">Aún no hay archivos. También puede arrastrarlos a esta ventana.</p>'}</div>
+      <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
+    const caja = $('#dialogo-form');
+    $('#adj-archivos').onchange = async e => { await subirArchivos([...e.target.files], tabla, id); pintar(); };
+    caja.ondragover = e => e.preventDefault();
+    caja.ondrop = async e => { e.preventDefault(); await subirArchivos([...e.dataTransfer.files], tabla, id); pintar(); };
+    caja.onclick = async e => { const q = e.target.closest('[data-quitar]'); if (q) { e.preventDefault(); if (confirm('¿Eliminar este archivo?')) { try { await api('t/adjunto/' + q.dataset.quitar, 'DELETE'); pintar(); } catch (er) { aviso('Error: ' + er.message); } } } };
+  };
+  await pintar();
+  if (!$('#dialogo').open) $('#dialogo').showModal();
+  $('#dialogo').addEventListener('close', () => { $('#dialogo-form').onclick = $('#dialogo-form').ondrop = null; marcarAdjuntos($('#contenido-doc')); }, { once: true });
+}
+// Registro fotográfico del proyecto: todas las fotos, con filtro por mes y frente
+async function vFotos(cont) {
+  E.fotoMes = E.fotoMes ?? hoyISO().slice(0, 7);
+  const fotos = await api(`adjuntos/${E.pid}?categoria=Foto${E.fotoMes ? '&mes=' + E.fotoMes : ''}`);
+  const frentes = [...new Set(fotos.map(f => f.frente).filter(Boolean))];
+  const porFecha = {};
+  for (const f of fotos.filter(f => !E.fotoFrente || f.frente === E.fotoFrente)) (porFecha[f.fecha] = porFecha[f.fecha] || []).push(f);
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Registro fotográfico</h2><span class="esp"></span>
+    <label class="sub">Mes <input type="month" id="f-mes" value="${E.fotoMes}"></label>
+    <label class="sub">Frente <select id="f-frente"><option value="">Todos</option>${frentes.map(f => `<option ${f === E.fotoFrente ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select></label></div>
+  <p class="sub">Tome fotos al menos cada semana y, cuando pueda, desde el mismo punto fijo para comparar el avance. Aquí también aparecen las fotos adjuntas a SST, ambiental, social, tramos y bitácora.</p>
+  ${formularioSubir(true)}
+  ${Object.entries(porFecha).map(([f, l]) => `<h3 class="h3">${fechaLarga(f)} · ${l.length} foto(s)</h3><div class="adjuntos">${l.map(miniatura).join('')}</div>`).join('') || '<p class="sub" style="padding:30px;text-align:center">No hay fotos en este periodo.</p>'}`;
+  $('#f-mes').onchange = e => { E.fotoMes = e.target.value; pintarDocs(); };
+  $('#f-frente').onchange = e => { E.fotoFrente = e.target.value; pintarDocs(); };
+  $('#adj-archivos').onchange = async e => { await subirArchivos([...e.target.files], 'proyecto', E.pid); pintarDocs(); };
+  cont.onclick = async e => { const q = e.target.closest('[data-quitar]'); if (q) { e.preventDefault(); if (confirm('¿Eliminar esta foto?')) { await api('t/adjunto/' + q.dataset.quitar, 'DELETE'); pintarDocs(); } } };
 }
 
 // ---------- Usuarios y auditoría ----------
@@ -820,7 +906,7 @@ async function vGastos(cont, cid) {
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Gastos reales de la interventoría</h2><span class="esp"></span><b>Total: ${pesos(total)}</b><button class="btn prim" id="g-nuevo">+ Nuevo gasto</button></div>
   <p class="sub">Registre aquí lo que realmente se paga (nómina, arriendo, vehículo, laboratorio…) y cárguelo a un ítem del presupuesto para comparar.</p>
   <div class="grilla-cont"><table class="grilla" id="g-gastos"><thead><tr><th>Fecha</th><th>Ítem del presupuesto</th><th>Descripción</th><th>Proveedor / persona</th><th>Documento</th><th class="num">Valor</th><th>Pagado</th><th></th></tr></thead><tbody>
-  ${gastos.map(g => `<tr data-id="${g.id}">${celda(g.fecha, 'fecha', 'date')}${celda(nomItem(g.item_id), 'item_id', 'select', `data-op="(sin ítem)|${esc(opItems)}"`)}${celda(g.descripcion, 'descripcion')}${celda(g.proveedor, 'proveedor')}${celda(g.documento, 'documento')}${celda(g.valor, 'valor', 'num')}${celda(g.pagado, 'pagado', 'select', 'data-op="No|Sí"')}<td><button class="btn" data-borrar="${g.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="sub">Sin gastos registrados</td></tr>'}
+  ${gastos.map(g => `<tr data-id="${g.id}">${celda(g.fecha, 'fecha', 'date')}${celda(nomItem(g.item_id), 'item_id', 'select', `data-op="(sin ítem)|${esc(opItems)}"`)}${celda(g.descripcion, 'descripcion')}${celda(g.proveedor, 'proveedor')}${celda(g.documento, 'documento')}${celda(g.valor, 'valor', 'num')}${celda(g.pagado, 'pagado', 'select', 'data-op="No|Sí"')}<td class="acciones"><button class="btn clip" data-adj="gasto:${g.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${g.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="8" class="sub">Sin gastos registrados</td></tr>'}
   </tbody></table></div>`;
   const g = $('#g-gastos');
   editable(g, (td, v) => {
@@ -876,7 +962,7 @@ async function vTabla(cont, tabla) {
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
     if (k === 'fecha' || k === 'plazo' || k === 'hasta') { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
     return celda(f[k], k, t);
-  }).join('')}<td><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
+  }).join('')}<td class="acciones"><button class="btn clip" data-adj="${tabla}:${f.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
   </tbody></table></div>`;
   if (tabla === 'sst_mes') {
     const ind = await api('sst-indicadores/' + E.pid);

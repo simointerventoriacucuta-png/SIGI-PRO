@@ -368,3 +368,29 @@ CREATE TABLE IF NOT EXISTS otrosi_item (
   cantidad REAL DEFAULT 0,
   vr_unitario REAL                  -- opcional, para ítems nuevos
 );
+
+-- Archivos adjuntos y registro fotográfico de cualquier registro (póliza, acta, otrosí, SST...)
+-- El contenido va aparte (adjunto_dato) para que las listas carguen rápido; ambos se sincronizan con Turso
+CREATE TABLE IF NOT EXISTS adjunto (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  tabla TEXT,                     -- a qué pertenece: poliza, acta, otrosi... o 'proyecto' para el registro general
+  registro_id INTEGER,
+  categoria TEXT DEFAULT 'Documento', -- Documento, Foto
+  nombre TEXT,
+  tipo_mime TEXT,
+  tamano INTEGER,
+  fecha TEXT,
+  frente TEXT,
+  abscisa TEXT,
+  punto TEXT,                     -- punto fijo de toma (fotos comparables en el tiempo)
+  descripcion TEXT,
+  lat REAL,
+  lon REAL,
+  usuario TEXT,
+  creado TEXT
+);
+CREATE TABLE IF NOT EXISTS adjunto_dato (
+  adjunto_id INTEGER PRIMARY KEY REFERENCES adjunto(id) ON DELETE CASCADE,
+  datos BLOB
+);

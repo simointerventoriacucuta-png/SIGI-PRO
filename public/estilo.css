@@ -222,3 +222,15 @@ svg.curva text { font-size: 10px; fill: #555; }
 .fila-barra b { text-align: right; font-weight: 600; }
 .h3 { font-size: 13px; margin: 12px 0 6px; }
 .va.bueno { color: var(--verde); } .va.malo { color: var(--rojo); }
+.clip.con::after { content: ' ' attr(data-n); font-weight: 700; color: var(--azul); }
+td.acciones { white-space: nowrap; }
+.subir { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; background: var(--azul-claro); border: 1px dashed #9dbbe0; border-radius: 4px; margin-bottom: 10px; }
+.subir input, .subir select { padding: 3px 6px; border: 1px solid var(--borde); border-radius: 3px; }
+.adjuntos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; max-height: 60vh; overflow: auto; }
+.adj { border: 1px solid var(--borde); border-radius: 4px; overflow: hidden; background: #fff; display: flex; flex-direction: column; }
+.adj img { width: 100%; height: 130px; object-fit: cover; display: block; background: #eee; }
+.adj .doc { height: 130px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 42px; text-decoration: none; background: #f6f6f6; }
+.adj .doc span { font-size: 12px; color: var(--tenue); }
+.adj-info { padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; }
+.adj-info b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adj-info span { color: var(--tenue); }
