@@ -1097,7 +1097,7 @@ async function pintarLateral() {
   if (E.buscar) buscar();
 }
 
-// ---------- Asistente (Claude) ----------
+// ---------- Asistente (Gemini, Ollama o Claude) ----------
 E.chat = [];
 // Markdown sencillo: negrita, código, títulos, listas y tablas (el HTML se escapa antes)
 function md(t) {
@@ -1151,13 +1151,13 @@ function pintarMensajes() {
   chat.innerHTML = E.chat.map((m, i) => `<div class="msg ${m.role}">${m.role === 'user' ? esc(m.content).replace(/\n/g, '<br>') : md(m.content)}${
     m.estado ? `<div class="pensando">${esc(m.estado)}</div>` : ''}${m.pend ? `<div class="confirmar"><b>¿Confirma esta acción?</b>${m.pend.acciones.map(a => `<div>• ${esc(a)}</div>`).join('')}
     <div class="acciones"><button class="btn" data-conf="0" data-i="${i}">Cancelar</button><button class="btn prim" data-conf="1" data-i="${i}">Guardar</button></div></div>` : ''}</div>`).join('')
-    || `<p class="sub">Pregunte sobre el proyecto: saldos, actas, vencimientos, riesgos… El asistente consulta la base y le pide confirmación antes de guardar algo.</p>${E.sinClave ? '<p class="aviso-clave">⚠️ Falta la clave de la API de Claude. El director la configura en <b>Inicio → Asistente → Clave del asistente</b>.</p>' : ''}`;
+    || `<p class="sub">Pregunte sobre el proyecto: saldos, actas, vencimientos, riesgos… El asistente consulta la base y le pide confirmación antes de guardar algo.</p>${E.sinClave ? `<p class="aviso-clave">⚠️ Falta la clave de ${esc(E.proveedorIA || 'Gemini')}. El director la configura en <b>Inicio → Asistente → Clave del asistente</b>.</p>` : ''}`;
   chat.scrollTop = chat.scrollHeight;
 }
 function pintarAsistente(c) {
   c.innerHTML = `<div class="asistente"><div id="chat" class="chat"></div><div id="chat-sug" class="chat-sug"></div>
     <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter (Mayús+Enter: nueva línea)"></textarea>
-    <div class="chat-pie"><span class="sub">✦ Claude · Ctrl+J</span><button class="btn" id="chat-limpiar">Nueva conversación</button></div></div>`;
+    <div class="chat-pie"><span class="sub">✦ ${esc(E.proveedorIA || 'Gemini')} · Ctrl+J</span><button class="btn" id="chat-limpiar">Nueva conversación</button></div></div>`;
   pintarMensajes(); pintarSugerencias();
   const txt = $('#chat-txt');
   txt.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(txt.value); } };
@@ -1168,7 +1168,7 @@ function pintarAsistente(c) {
 }
 function abrirAsistente() {
   mostrarLateral('asistente');
-  api('asistente/config').then(s => { E.sinClave = !s.configurado; if (!E.chat.length) pintarMensajes(); }).catch(() => {});
+  api('asistente/config').then(s => { E.sinClave = !s.configurado; E.proveedorIA = s.nombre; pintarMensajes(); }).catch(() => {});
 }
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); if (!$('#dialogo').open) abrirAsistente(); } });
 $('#btn-asistente').onclick = abrirAsistente;
@@ -1222,11 +1222,39 @@ async function conversar(cuerpo) {
   E.chatOcupado = false;
   if (E.lateral === 'asistente') pintarMensajes();
 }
+// Elegir el proveedor de IA y sus datos. Las claves se guardan solo en este equipo y nunca se muestran.
 async function configurarAsistente() {
   const s = await api('asistente/config');
-  const clave = prompt((s.configurado ? 'El asistente ya tiene clave. ' : '') + 'Pegue la clave de la API de Claude (console.anthropic.com). Se guarda solo en este equipo:');
-  if (!clave) return;
-  try { await api('asistente/config', 'POST', { clave }); E.sinClave = false; aviso('Clave del asistente guardada'); } catch (e) { aviso('Error: ' + e.message); }
+  const puesta = t => (t ? 'guardada — deje vacío para conservarla' : 'pegue aquí la clave');
+  $('#dialogo-form').innerHTML = `<h3>Proveedor del asistente</h3>
+    <div class="proveedores">
+      <label><input type="radio" name="prov" value="gemini" ${s.proveedor === 'gemini' ? 'checked' : ''}><b>Gemini</b> (Google) · gratis con límites, o con los créditos mensuales de Google AI Pro</label>
+      <label><input type="radio" name="prov" value="ollama" ${s.proveedor === 'ollama' ? 'checked' : ''}><b>Ollama</b> · gratis en este computador · los datos no salen del equipo</label>
+      <label><input type="radio" name="prov" value="claude" ${s.proveedor === 'claude' ? 'checked' : ''}><b>Claude</b> (Anthropic) · de pago por uso · el mejor para análisis</label>
+    </div>
+    <div class="formulario" style="grid-template-columns:150px 1fr">
+      <label data-p="claude">Clave de Claude</label><input data-p="claude" id="ia-clave" type="password" placeholder="${puesta(s.tiene_clave)}">
+      <label data-p="gemini">Clave de Gemini</label><input data-p="gemini" id="ia-gemini" type="password" placeholder="${puesta(s.tiene_clave_gemini)}">
+      <label data-p="gemini">Modelo</label><input data-p="gemini" id="ia-mgemini" value="${esc(s.modelo_gemini)}">
+      <label data-p="ollama">Dirección</label><input data-p="ollama" id="ia-url" value="${esc(s.url_ollama)}">
+      <label data-p="ollama">Modelo</label><input data-p="ollama" id="ia-mollama" value="${esc(s.modelo_ollama)}">
+    </div>
+    <p class="sub" id="ia-ayuda"></p>
+    <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" id="ia-guardar">Guardar</button></div>`;
+  const AYUDA = { claude: 'Cree la clave en console.anthropic.com → API Keys (requiere saldo). La suscripción Claude Pro no sirve como clave.',
+    gemini: 'Cree la clave en aistudio.google.com → Get API key. Con Google AI Pro active los créditos de Google Cloud en developers.google.com → My Benefits. En el plan gratis Google puede usar los datos para mejorar sus productos.',
+    ollama: 'Instale Ollama (ollama.com), ábralo y descargue el modelo una vez con: ollama pull qwen2.5:7b. Necesita un PC con unos 16 GB de RAM.' };
+  const mostrar = () => { const p = $('#dialogo-form').querySelector('[name=prov]:checked').value; $('#dialogo-form').querySelectorAll('[data-p]').forEach(e => (e.hidden = e.dataset.p !== p)); $('#ia-ayuda').textContent = AYUDA[p]; };
+  $('#dialogo-form').querySelectorAll('[name=prov]').forEach(r => (r.onchange = mostrar)); mostrar();
+  $('#dialogo').showModal();
+  $('#ia-guardar').onclick = async ev => {
+    ev.preventDefault();
+    const proveedor = $('#dialogo-form').querySelector('[name=prov]:checked').value;
+    try {
+      await api('asistente/config', 'POST', { proveedor, clave: $('#ia-clave').value, clave_gemini: $('#ia-gemini').value, modelo_gemini: $('#ia-mgemini').value, url_ollama: $('#ia-url').value, modelo_ollama: $('#ia-mollama').value });
+      $('#dialogo').close(); aviso('Asistente configurado'); abrirAsistente();
+    } catch (e) { $('#ia-ayuda').textContent = 'Error: ' + e.message; }
+  };
 }
 
 // ---------- Sincronización con la nube (Turso) ----------

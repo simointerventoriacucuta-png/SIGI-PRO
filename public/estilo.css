@@ -256,3 +256,6 @@ td.acciones { white-space: nowrap; }
 .fila-campos { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .fila-campos input { flex: 1; min-width: 90px; }
 tr.tachado td { color: #999; text-decoration: line-through; }
+.proveedores { display: grid; gap: 6px; margin: 6px 0 12px; }
+.proveedores label { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--borde); border-radius: 4px; cursor: pointer; }
+.proveedores label:has(input:checked) { border-color: var(--azul); background: var(--azul-claro); }

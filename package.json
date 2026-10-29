@@ -17,6 +17,7 @@
             "server.js",
             "integraciones.js",
             "informe.js",
+            "proveedores.js",
             "db.js",
             "schema.sql",
             "seed/**",

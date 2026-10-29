@@ -7,6 +7,7 @@ const path = require('node:path');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
 const { informeFormato } = require('./informe.js');
+const prov = require('./proveedores.js');
 
 const PUERTO = process.env.PORT != null ? Number(process.env.PORT) : 4027;
 const RAIZ = __dirname;
@@ -317,10 +318,14 @@ async function validarEstado(u, antes, d) {
     throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
 }
 
-// ---------- Asistente con Claude ----------
-// La clave de la API se toma de ANTHROPIC_API_KEY o de datos/asistente.json (solo en este equipo)
+// ---------- Asistente (Gemini por defecto, Ollama local o Claude) ----------
+// La configuración y las claves se guardan en datos/asistente.json (solo en este equipo).
+// Claude también toma la clave de ANTHROPIC_API_KEY.
 const ARCH_ASISTENTE = path.join(DATOS, 'asistente.json');
-const claveAsistente = () => process.env.ANTHROPIC_API_KEY || (fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')).clave : null);
+const PROVEEDORES = ['gemini', 'ollama', 'claude'];
+const configAsistente = () => { const c = fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')) : {}; return { proveedor: 'gemini', ...c, clave: c.clave || process.env.ANTHROPIC_API_KEY || null }; };
+const asistenteListo = c => (c.proveedor === 'gemini' ? !!c.clave_gemini : c.proveedor === 'ollama' ? true : !!c.clave);
+const NOMBRE_PROVEEDOR = { claude: 'Claude', gemini: 'Gemini', ollama: 'Ollama (local)' };
 const MAX_VUELTAS = 8;
 
 // Herramientas del asistente. Las de lectura se ejecutan solas; las de escritura esperan la confirmación del usuario.
@@ -460,10 +465,27 @@ ${JSON.stringify(datos)}`;
 
 // Bucle de herramientas con respuesta en tiempo real. ev(evento, datos) envía cada evento al navegador.
 async function asistente(pid, b, u, ev) {
-  const clave = claveAsistente();
-  if (!clave) throw new Rechazo(400, 'Falta la clave de la API de Claude. El director la configura en Inicio → Asistente → Clave del asistente.');
+  const cfg = configAsistente();
+  if (cfg.proveedor === 'claude' && !cfg.clave) throw new Rechazo(400, 'Falta la clave de la API de Claude. El director la configura en Inicio → Asistente → Clave del asistente.');
   const Anthropic = require('@anthropic-ai/sdk');
-  const cliente = new Anthropic({ apiKey: clave });
+  const cliente = cfg.proveedor === 'claude' ? new Anthropic({ apiKey: cfg.clave }) : null;
+  // Una vuelta del modelo: devuelve { content, stop_reason } en el formato de Claude
+  const turno = async (sistema, mensajes) => {
+    if (cfg.proveedor === 'gemini') return prov.turnoGemini(cfg, sistema, mensajes, HERRAMIENTAS, t => ev('texto', { t }));
+    if (cfg.proveedor === 'ollama') return prov.turnoOllama(cfg, sistema, mensajes, HERRAMIENTAS, t => ev('texto', { t }));
+    const flujo = cliente.beta.messages.stream({
+      model: 'claude-opus-5-5',
+      max_tokens: 16000,
+      output_config: { effort: 'medium' },
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: sistema }],
+      tools: HERRAMIENTAS,
+      messages: mensajes,
+    });
+    flujo.on('text', t => ev('texto', { t }));
+    return flujo.finalMessage();
+  };
   let mensajes;
   if (b.continuar) {
     const p = PENDIENTES.get(b.continuar);
@@ -487,18 +509,7 @@ async function asistente(pid, b, u, ev) {
   const sistema = await sistemaAsistente(pid, u);
   try {
     for (let vuelta = 0; vuelta < MAX_VUELTAS; vuelta++) {
-      const flujo = cliente.beta.messages.stream({
-        model: 'claude-opus-5-5',
-        max_tokens: 16000,
-        output_config: { effort: 'medium' },
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: sistema }],
-        tools: HERRAMIENTAS,
-        messages: mensajes,
-      });
-      flujo.on('text', t => ev('texto', { t }));
-      const resp = await flujo.finalMessage();
+      const resp = await turno(sistema, mensajes);
       if (resp.stop_reason === 'refusal') return ev('texto', { t: '\n\nEl asistente no puede responder esa consulta. Intente formularla de otra manera.' });
       mensajes.push({ role: 'assistant', content: resp.content });
       if (resp.stop_reason === 'pause_turn') continue;
@@ -519,7 +530,10 @@ async function asistente(pid, b, u, ev) {
       ev('texto', { t: '\n\n' });
     }
     ev('texto', { t: '\n\n(Se alcanzó el límite de consultas para esta pregunta: pídame que continúe si hace falta.)' });
-  } catch (e) { throw new Rechazo(e instanceof Anthropic.AuthenticationError ? 400 : e.status || 500, errorAmable(e, Anthropic)); }
+  } catch (e) {
+    if (e instanceof prov.ErrorProveedor) throw new Rechazo(e.codigo, e.message);
+    throw new Rechazo(e instanceof Anthropic.AuthenticationError ? 400 : e.status || 500, errorAmable(e, Anthropic));
+  }
 }
 
 // Respuesta en tiempo real (Server-Sent Events). Los errores antes del primer evento salen como JSON.
@@ -684,11 +698,19 @@ async function api(req, res, url) {
     return enviar(res, 200, yo);
   }
   if (r0 === 'auditoria' && req.method === 'GET') return enviar(res, 200, await db.all('SELECT * FROM auditoria ORDER BY id DESC LIMIT ?', Number(q.limite) || 200));
-  if (r0 === 'asistente' && r1 === 'config' && req.method === 'GET') return enviar(res, 200, { configurado: !!claveAsistente() });
+  if (r0 === 'asistente' && r1 === 'config' && req.method === 'GET') {
+    // Nunca se devuelven las claves, solo si están puestas
+    const c = configAsistente();
+    return enviar(res, 200, { configurado: asistenteListo(c), proveedor: c.proveedor, nombre: NOMBRE_PROVEEDOR[c.proveedor], tiene_clave: !!c.clave, tiene_clave_gemini: !!c.clave_gemini,
+      modelo_gemini: c.modelo_gemini || 'gemini-flash-latest', url_ollama: c.url_ollama || 'http://127.0.0.1:11434', modelo_ollama: c.modelo_ollama || 'qwen2.5:7b' });
+  }
   if (r0 === 'asistente' && r1 === 'config' && req.method === 'POST') {
     exigir(u, 'asistente');
-    const b = await leerCuerpo(req);
-    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify({ clave: String(b.clave || '').trim() }));
+    const b = await leerCuerpo(req), c = fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')) : {};
+    if (b.proveedor != null && !PROVEEDORES.includes(b.proveedor)) throw new Rechazo(400, 'Proveedor desconocido');
+    // Las claves vacías no borran las guardadas
+    for (const k of ['proveedor', 'clave', 'clave_gemini', 'modelo_gemini', 'url_ollama', 'modelo_ollama']) if (b[k] != null && String(b[k]).trim() !== '') c[k] = String(b[k]).trim();
+    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify(c));
     await auditar(u, 'asistente', null, 'configurar', null);
     return enviar(res, 200, { ok: true });
   }
