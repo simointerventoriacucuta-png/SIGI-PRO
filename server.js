@@ -15,14 +15,14 @@ const db = new Base(DATOS);
 
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
-  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', gasto: 'contrato_id',
+  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', gasto: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id']],
-  contrato: [['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id']],
+  contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id']],
   acta: [['acta_item', 'acta_id']],
   item: [['item', 'padre_id'], ['acta_item', 'item_id']],
 };
@@ -35,7 +35,7 @@ const PERMISOS = {
   director: '*',
   residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia'],
   especialista: ['acta_item', 'bitacora', 'ensayo'],
-  administrativo: ['acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
+  administrativo: ['otrosi', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
 const puede = (u, recurso) => !!u && (PERMISOS[u.rol] === '*' || (PERMISOS[u.rol] || []).includes(recurso));
@@ -172,7 +172,12 @@ async function resumen(proyectoId) {
     }
     const ejecutado = actas.length ? actas[actas.length - 1].acumulado : 0;
     const gastado = (await db.get('SELECT COALESCE(SUM(valor), 0) v FROM gasto WHERE contrato_id = ?', c.id)).v;
-    contratos.push({ ...c, presupuesto: pr.totales.total, costo_directo: pr.totales.costo_directo, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado, gastado });
+    // Valor y plazo vigentes = originales + otrosíes firmados
+    const otrosis = await db.all('SELECT * FROM otrosi WHERE contrato_id = ? ORDER BY numero, id', c.id);
+    const firmados = otrosis.filter(o => o.estado === 'Firmado');
+    const adiciones = r2(firmados.reduce((s, o) => s + (o.valor || 0), 0)), prorroga = firmados.reduce((s, o) => s + (o.dias || 0), 0);
+    const finVigente = c.fecha_fin && prorroga ? new Date(new Date(c.fecha_fin + 'T00:00:00Z').getTime() + prorroga * 86400000).toISOString().slice(0, 10) : c.fecha_fin;
+    contratos.push({ ...c, otrosis, adiciones, prorroga_dias: prorroga, valor_vigente: r2((c.valor || 0) + adiciones), fecha_fin_vigente: finVigente, presupuesto: pr.totales.total, costo_directo: pr.totales.costo_directo, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado, gastado });
   }
   const vencimientos = await db.all(`SELECT * FROM vencimiento WHERE proyecto_id = ? AND estado <> 'Cumplido' ORDER BY fecha IS NULL, fecha`, proyectoId);
   const conteos = {};
@@ -205,6 +210,8 @@ async function buscar(proyectoId, texto) {
     const nombre = c.tipo === 'obra' ? 'Presupuesto de obra' : 'Presupuesto de interventoría';
     for (const it of await db.all('SELECT id, codigo, descripcion FROM item WHERE contrato_id = ? AND (codigo LIKE ? OR descripcion LIKE ?) ORDER BY orden LIMIT 15', c.id, like, like))
       out.push({ grupo: nombre, titulo: [it.codigo, it.descripcion].filter(Boolean).join(' · '), abrir: 'presupuesto:' + c.id });
+    for (const o of await db.all('SELECT numero, tipo, objeto FROM otrosi WHERE contrato_id = ? AND (objeto LIKE ? OR tipo LIKE ?)', c.id, like, like))
+      out.push({ grupo: 'Otrosíes', titulo: `Otrosí ${o.numero} · ${o.tipo}${o.objeto ? ' · ' + o.objeto : ''}`, abrir: 'otrosis:' + c.id });
     for (const a of await db.all('SELECT id, numero, estado, observaciones FROM acta WHERE contrato_id = ? AND (CAST(numero AS TEXT) = ? OR estado LIKE ? OR observaciones LIKE ?) ORDER BY numero', c.id, t.replace(/\D/g, ''), like, like))
       out.push({ grupo: c.tipo === 'obra' ? 'Actas parciales' : 'Cuentas de cobro', titulo: `${c.tipo === 'obra' ? 'Acta' : 'Cuenta'} ${a.numero} · ${a.estado}`, abrir: 'acta:' + a.id });
   }
@@ -229,6 +236,8 @@ async function avisos(proyectoId) {
     out.push({ fecha: p.hasta, tipo: 'Póliza', texto: `${p.amparo || ''} ${p.numero || ''} (${p.contrato || ''}) vence`, abrir: 'tabla:poliza' });
   for (const c of await db.all(`SELECT * FROM correspondencia WHERE proyecto_id = ? AND requiere_respuesta = 'Sí' AND COALESCE(estado, '') NOT IN ('Cerrada', 'Respondida') AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
     out.push({ fecha: c.plazo, tipo: 'Respuesta', texto: `${c.radicado || ''} ${c.asunto || ''}`.trim(), abrir: 'tabla:correspondencia' });
+  for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
+    out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
@@ -403,6 +412,7 @@ async function api(req, res, url) {
       if (tabla === 'item' && d.orden == null) d.orden = (await db.get('SELECT COALESCE(MAX(orden), 0) + 1 m FROM item WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta') await validarEstado(u, null, d);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
+      if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       const k = Object.keys(d);
       const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));

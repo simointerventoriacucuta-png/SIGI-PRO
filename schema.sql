@@ -191,3 +191,17 @@ CREATE TABLE IF NOT EXISTS auditoria (
   accion TEXT,              -- crear, editar, borrar
   cambio TEXT
 );
+
+-- Otrosíes y modificaciones: adición de valor y prórroga, con historial
+CREATE TABLE IF NOT EXISTS otrosi (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER,
+  fecha TEXT,
+  tipo TEXT DEFAULT 'Adición',      -- Adición, Prórroga, Adición y prórroga, Modificación, Suspensión
+  valor REAL DEFAULT 0,             -- valor adicionado (con AIU/IVA)
+  dias INTEGER DEFAULT 0,           -- días de prórroga
+  objeto TEXT,                      -- qué modifica y por qué
+  estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
+  polizas_ajustadas TEXT DEFAULT 'No'
+);
