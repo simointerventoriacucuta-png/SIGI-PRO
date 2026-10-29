@@ -142,7 +142,23 @@ CREATE TABLE IF NOT EXISTS correspondencia (
   requiere_respuesta TEXT,
   plazo TEXT,
   estado TEXT DEFAULT 'Abierta',
-  archivo TEXT
+  archivo TEXT,
+  origen TEXT,              -- Gmail cuando se importó del correo
+  message_id TEXT,          -- Message-ID del correo (evita duplicados)
+  resumen_ia TEXT,          -- sugerencia de la IA: resumen
+  vencimientos_ia TEXT      -- sugerencia de la IA: vencimientos (JSON) pendientes de confirmar
+);
+
+-- Archivos adjuntos de cualquier registro (el archivo queda en datos/adjuntos/<tabla>/<id>/)
+CREATE TABLE IF NOT EXISTS adjunto (
+  id INTEGER PRIMARY KEY,
+  tabla TEXT NOT NULL,
+  registro_id INTEGER NOT NULL,
+  nombre TEXT,
+  tipo TEXT,
+  tamano INTEGER,
+  ruta TEXT,
+  fecha TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bitacora (

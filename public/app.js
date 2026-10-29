@@ -81,6 +81,7 @@ const CINTA = {
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
     ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
     ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente (Claude)', 'memoria', () => mostrarLateral('asistente')], ['Clave del asistente', 'nube', configurarAsistente]]],
+    ['Correo', [['Correo (Gmail)', 'correo', dialogoCorreo, () => E.usuario?.rol === 'director'], ['Revisar ahora', 'sincronizar', revisarCorreo, () => E.usuario?.rol === 'director']]],
     ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
@@ -390,6 +391,12 @@ async function vOtrosis(cont, cid) {
   <p class="sub">Solo los otrosíes en estado Firmado suman al valor y al plazo vigentes. Mientras las pólizas no estén ajustadas, la campana lo recuerda.</p>`;
   const g = $('#g-otrosi');
   editable(g, (td, v) => api('t/otrosi/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => {
+    const v = e.target.closest('[data-venc]');
+    if (v) { if (!confirm('¿Crear los vencimientos que sugirió la IA?\n\n' + v.title)) return; try { const r = await api('correo/vencimientos/' + v.dataset.venc, 'POST'); aviso(r.creados + ' vencimientos creados'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } return; }
+    const a = e.target.closest('[data-adj]');
+    if (a) { e.preventDefault(); const l = await api(`adjuntos?tabla=correspondencia&registro_id=${a.dataset.adj}`); a.outerHTML = l.map(x => `<a href="/api/adjunto/${x.id}">${esc(x.nombre)}</a>`).join(' · ') || 'Sin adjuntos'; }
+  });
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este otrosí?')) { try { await api('t/otrosi/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
   $('#o-nuevo').onclick = async () => { try { await api('t/otrosi', 'POST', { contrato_id: c.id, fecha: hoyISO(), estado: 'En trámite' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
@@ -517,6 +524,12 @@ async function vGastos(cont, cid) {
     if (td.dataset.c === 'item_id') { const i = items.find(x => `${x.codigo} ${x.descripcion}`.replace(/\|/g, '/') === v); v = i ? i.id : null; }
     return api('t/gasto/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v });
   });
+  g.addEventListener('click', async e => {
+    const v = e.target.closest('[data-venc]');
+    if (v) { if (!confirm('¿Crear los vencimientos que sugirió la IA?\n\n' + v.title)) return; try { const r = await api('correo/vencimientos/' + v.dataset.venc, 'POST'); aviso(r.creados + ' vencimientos creados'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } return; }
+    const a = e.target.closest('[data-adj]');
+    if (a) { e.preventDefault(); const l = await api(`adjuntos?tabla=correspondencia&registro_id=${a.dataset.adj}`); a.outerHTML = l.map(x => `<a href="/api/adjunto/${x.id}">${esc(x.nombre)}</a>`).join(' · ') || 'Sin adjuntos'; }
+  });
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este gasto?')) { await api('t/gasto/' + b.dataset.borrar, 'DELETE'); refrescar(); } });
   $('#g-nuevo').onclick = async () => { await api('t/gasto', 'POST', { contrato_id: Number(cid), fecha: hoyISO(), valor: 0, pagado: 'No' }); refrescar(); };
 }
@@ -546,7 +559,7 @@ const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
   personal: { titulo: 'Personal de interventoría', cols: [['nombre', 'Nombre'], ['cargo', 'Cargo'], ['dedicacion', 'Dedicación %', 'num'], ['cedula', 'Cédula'], ['matricula', 'Matrícula'], ['telefono', 'Teléfono'], ['correo', 'Correo'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   poliza: { titulo: 'Pólizas y garantías', cols: [['contrato', 'Contrato'], ['amparo', 'Amparo'], ['porcentaje', '%', 'num'], ['valor', 'Valor asegurado', 'num'], ['aseguradora', 'Aseguradora'], ['numero', 'N.º póliza'], ['desde', 'Desde', 'date'], ['hasta', 'Hasta', 'date'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
-  correspondencia: { titulo: 'Correspondencia', cols: [['fecha', 'Fecha', 'date'], ['sentido', 'Sentido', 'select:Recibida|Enviada'], ['radicado', 'Radicado'], ['de', 'De'], ['para', 'Para'], ['asunto', 'Asunto'], ['requiere_respuesta', '¿Responder?', 'select:Sí|No'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select'], ['archivo', 'Archivo']] },
+  correspondencia: { titulo: 'Correspondencia', cols: [['fecha', 'Fecha', 'date'], ['sentido', 'Sentido', 'select:Recibida|Enviada'], ['radicado', 'Radicado'], ['de', 'De'], ['para', 'Para'], ['asunto', 'Asunto'], ['requiere_respuesta', '¿Responder?', 'select:Sí|No'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select'], ['archivo', 'Archivo'], ['resumen_ia', 'Resumen (IA)', 'ia']] },
   bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['clima', 'Clima', 'select:Seco|Lluvia|Lluvia intermitente'], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['observaciones', 'Observaciones']] },
   ensayo: { titulo: 'Ensayos de laboratorio', cols: [['fecha', 'Fecha', 'date'], ['ensayo', 'Ensayo'], ['norma', 'Norma'], ['item', 'Ítem'], ['abscisa', 'Abscisa'], ['resultado', 'Resultado'], ['especificacion', 'Especificación'], ['cumple', 'Cumple', 'select:Sí|No|Pendiente'], ['laboratorio', 'Laboratorio']] },
 };
@@ -558,11 +571,19 @@ async function vTabla(cont, tabla) {
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
     if (k === 'fecha' || k === 'plazo' || k === 'hasta') { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
+    if (t === 'ia') { const vs = f.vencimientos_ia ? JSON.parse(f.vencimientos_ia) : [];
+      return `<td class="sub" style="max-width:320px;white-space:normal">${esc(f[k] || '')}${vs.length ? `<br><button class="btn prim" data-venc="${f.id}" title="${esc(vs.map(v => (v.fecha || 'sin fecha') + ' · ' + v.descripcion).join('\n'))}">Crear vencimientos sugeridos (${vs.length})</button>` : ''}${f.origen === 'Gmail' ? `<br><a href="#" data-adj="${f.id}">📎 Adjuntos</a>` : ''}</td>`; }
     return celda(f[k], k, t);
   }).join('')}<td><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
   </tbody></table></div>`;
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => {
+    const v = e.target.closest('[data-venc]');
+    if (v) { if (!confirm('¿Crear los vencimientos que sugirió la IA?\n\n' + v.title)) return; try { const r = await api('correo/vencimientos/' + v.dataset.venc, 'POST'); aviso(r.creados + ' vencimientos creados'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } return; }
+    const a = e.target.closest('[data-adj]');
+    if (a) { e.preventDefault(); const l = await api(`adjuntos?tabla=correspondencia&registro_id=${a.dataset.adj}`); a.outerHTML = l.map(x => `<a href="/api/adjunto/${x.id}">${esc(x.nombre)}</a>`).join(' · ') || 'Sin adjuntos'; }
+  });
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
   $('#t-nuevo').onclick = async () => { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(tabla === 'bitacora' || tabla === 'correspondencia' || tabla === 'ensayo' ? { fecha: hoyISO() } : {}) }); refrescar(); };
 }
@@ -626,6 +647,49 @@ function pintarSync() {
   el.title = 'Base en la nube: los cambios se comparten con los demás computadores'; el.className = 'sync ok';
 }
 async function sincronizarAhora() { await api('sync/ahora', 'POST'); await refrescar(); aviso('Sincronizado'); }
+// ---------- Correo (Gmail por IMAP con contraseña de aplicación) ----------
+async function dialogoCorreo() {
+  let s; try { s = await api('correo/config'); } catch (e) { return aviso('Error: ' + e.message); }
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Correo (Gmail)</h3>
+  <p class="sub">SIGI revisa la cuenta por IMAP y registra cada correo nuevo en Correspondencia, con sus adjuntos. Use una <b>contraseña de aplicación</b> de Google (myaccount.google.com/apppasswords, requiere verificación en 2 pasos), no su contraseña normal. Se guarda solo en este equipo.</p>
+  <div class="formulario" style="grid-template-columns:170px 1fr">
+    <label>Cuenta de Gmail</label><input id="co-correo" type="email" placeholder="interventoria@gmail.com" value="${esc(s.correo)}">
+    <label>Contraseña de aplicación</label><input id="co-clave" type="password" placeholder="${s.tiene_clave ? '(guardada; escriba para cambiarla)' : 'xxxx xxxx xxxx xxxx'}">
+    <label>Carpeta o etiqueta</label><input id="co-carpeta" placeholder="INBOX o SIGI" value="${esc(s.carpeta)}">
+    <label>Solo de (remitente)</label><input id="co-de" placeholder="opcional: @invias.gov.co" value="${esc(s.filtro_de)}">
+    <label>Asunto contiene</label><input id="co-asunto" placeholder="opcional: Contrato 123" value="${esc(s.filtro_asunto)}">
+    <label>Revisar cada (min)</label><input id="co-min" type="number" min="1" value="${esc(s.minutos)}">
+    <label>Marcar como leído</label><input id="co-leido" type="checkbox" ${s.marcar_leido ? 'checked' : ''} style="justify-self:start">
+    <label>Revisión automática</label><input id="co-activo" type="checkbox" ${s.activo ? 'checked' : ''} style="justify-self:start">
+    <label>Clave de Gemini (IA)</label><input id="co-gemini" type="password" placeholder="${s.ia ? '(guardada; escriba para cambiarla)' : 'opcional: resume y sugiere plazos'}">
+  </div>
+  <p class="sub" id="co-msg">${s.estado.error ? '⚠️ ' + esc(s.estado.error) : s.estado.ultima ? 'Última revisión: ' + new Date(s.estado.ultima).toLocaleString('es-CO') : ''}</p>
+  <div class="acciones"><button class="btn" value="no">Cerrar</button><button class="btn" id="co-probar">Probar conexión</button><button class="btn" id="co-revisar">Revisar ahora</button><button class="btn prim" id="co-guardar">Guardar</button></div>`;
+  $('#dialogo').showModal();
+  const datos = () => ({ correo: $('#co-correo').value.trim(), clave: $('#co-clave').value.trim(), carpeta: $('#co-carpeta').value.trim() || 'INBOX', filtro_de: $('#co-de').value.trim(),
+    filtro_asunto: $('#co-asunto').value.trim(), minutos: Number($('#co-min').value) || 15, marcar_leido: $('#co-leido').checked, activo: $('#co-activo').checked, proyecto_id: E.pid });
+  const msg = t => ($('#co-msg').innerHTML = t);
+  $('#co-probar').onclick = async ev => { ev.preventDefault(); msg('Conectando con imap.gmail.com…');
+    try { const r = await api('correo/probar', 'POST', datos()); msg(r.ok ? `✅ Conexión correcta: ${r.mensajes} correos en la carpeta (${r.sin_leer} sin leer)` : '❌ ' + esc(r.error)); } catch (e) { msg('❌ ' + esc(e.message)); } };
+  $('#co-guardar').onclick = async ev => { ev.preventDefault();
+    try { await api('correo/config', 'POST', datos()); const g = $('#co-gemini').value.trim(); if (g) await api('asistente/config', 'POST', { gemini: g }); msg('✅ Configuración guardada'); aviso('Correo configurado'); } catch (e) { msg('❌ ' + esc(e.message)); } };
+  $('#co-revisar').onclick = async ev => { ev.preventDefault(); msg('Revisando…'); const r = await revisarCorreo(); msg(r.ok ? `✅ ${r.nuevos} correos nuevos` : '❌ ' + esc(r.error || '')); };
+}
+async function revisarCorreo() {
+  try { const r = await api('correo/revisar', 'POST'); aviso(r.ok ? `Gmail: ${r.nuevos} ${r.nuevos === 1 ? 'correo nuevo' : 'correos nuevos'}` : 'Gmail: ' + r.error); if (r.ok && r.nuevos) refrescar(); return r; }
+  catch (e) { aviso('Error: ' + e.message); return { ok: false, error: e.message }; }
+}
+// Barra de estado: avisa cuando la revisión automática trae correos nuevos
+let ultimaImportacion = null;
+setInterval(async () => {
+  try {
+    const s = await api('correo/estado'), t = s.ultima_importacion || '';
+    if (ultimaImportacion !== null && t !== ultimaImportacion) { aviso(`Gmail: ${s.nuevos} ${s.nuevos === 1 ? 'correo nuevo' : 'correos nuevos'}`); if (E.pid) refrescar(); }
+    ultimaImportacion = t;
+  } catch {}
+}, 60000);
+
 async function dialogoSync() {
   const s = await api('sync');
   const f = $('#dialogo-form');

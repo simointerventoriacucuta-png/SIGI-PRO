@@ -5,6 +5,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Base } = require('./db.js');
+const { crearCorreo } = require('./correo.js');
 
 const PUERTO = process.env.PORT != null ? Number(process.env.PORT) : 4027;
 const RAIZ = __dirname;
@@ -77,6 +78,9 @@ async function iniciar() {
   await db.abrir();
   await db.exec(ESQUEMA);
   if (!(await db.all('PRAGMA table_info(usuario)')).some(c => c.name === 'correo')) await db.run('ALTER TABLE usuario ADD COLUMN correo TEXT');
+  const colCorr = (await db.all('PRAGMA table_info(correspondencia)')).map(c => c.name);
+  for (const c of ['origen', 'message_id', 'resumen_ia', 'vencimientos_ia']) if (!colCorr.includes(c)) await db.run(`ALTER TABLE correspondencia ADD COLUMN ${c} TEXT`);
+  await db.run('CREATE INDEX IF NOT EXISTS correspondencia_mid ON correspondencia (message_id)');
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)
@@ -94,6 +98,7 @@ async function borrar(tabla, id) {
     for (const h of await db.all(`SELECT id FROM ${hijo} WHERE ${col} = ?`, id)) await borrar(hijo, h.id);
   }
   if (tabla === 'gasto' || tabla === 'item') await db.run('UPDATE gasto SET item_id = NULL WHERE item_id = ?', tabla === 'item' ? id : -1);
+  await db.run('DELETE FROM adjunto WHERE tabla = ? AND registro_id = ?', tabla, id);
   await db.run(`DELETE FROM ${tabla} WHERE id = ?`, id);
 }
 
@@ -238,6 +243,11 @@ async function avisos(proyectoId) {
     out.push({ fecha: c.plazo, tipo: 'Respuesta', texto: `${c.radicado || ''} ${c.asunto || ''}`.trim(), abrir: 'tabla:correspondencia' });
   for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
+  // Correos de Gmail: importados hoy y vencimientos sugeridos por la IA sin confirmar
+  const nuevos = (await db.get(`SELECT COUNT(*) n FROM correspondencia WHERE proyecto_id = ? AND origen = 'Gmail' AND estado = 'Abierta' AND fecha >= ?`, proyectoId, iso(new Date(hoy.getTime() - 86400000)))).n;
+  if (nuevos) out.push({ fecha: iso(hoy), tipo: 'Gmail', texto: `${nuevos} ${nuevos === 1 ? 'correo nuevo' : 'correos nuevos'}`, abrir: 'tabla:correspondencia' });
+  for (const c of await db.all(`SELECT id, asunto, fecha FROM correspondencia WHERE proyecto_id = ? AND vencimientos_ia IS NOT NULL`, proyectoId))
+    out.push({ fecha: c.fecha || iso(hoy), tipo: 'Sugerencia IA', texto: `Vencimientos sugeridos: ${c.asunto || ''}`, abrir: 'tabla:correspondencia' });
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
@@ -291,6 +301,11 @@ ${JSON.stringify(datos)}` }],
   return { texto: resp.content.filter(b => b.type === 'text').map(b => b.text).join('\n') };
 }
 
+// ---------- Correo (Gmail por IMAP) ----------
+// La IA del correo usa Gemini: GEMINI_API_KEY o el campo "gemini" de datos/asistente.json
+const claveGemini = () => process.env.GEMINI_API_KEY || (fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')).gemini : null) || null;
+const correo = crearCorreo({ db, datos: DATOS, auditar, claveIA: claveGemini });
+
 // ---------- HTTP ----------
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
@@ -332,11 +347,46 @@ async function api(req, res, url) {
   if (r0 === 'asistente' && r1 === 'config' && req.method === 'POST') {
     exigir(u, 'asistente');
     const b = await leerCuerpo(req);
-    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify({ clave: String(b.clave || '').trim() }));
+    const prev = fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')) : {};
+    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify({ ...prev, ...(b.clave != null ? { clave: String(b.clave).trim() } : {}), ...(b.gemini != null ? { gemini: String(b.gemini).trim() } : {}) }));
     await auditar(u, 'asistente', null, 'configurar', null);
     return enviar(res, 200, { ok: true });
   }
   if (r0 === 'asistente' && req.method === 'POST') { const b = await leerCuerpo(req); return enviar(res, 200, await asistente(Number(r1), b.mensajes || [], u)); }
+  // Correo (Gmail): solo el director configura; la contraseña nunca sale por la API
+  if (r0 === 'correo') {
+    if (r1 === 'config' && req.method === 'GET') { exigir(u, 'correo'); return enviar(res, 200, { ...correo.publica(), ia: !!claveGemini() }); }
+    if (r1 === 'estado') return enviar(res, 200, correo.publica().estado);
+    if (req.method !== 'GET') exigir(u, 'correo');
+    if (r1 === 'config' && req.method === 'POST') { const b = await leerCuerpo(req); correo.guardar(b); await auditar(u, 'correo', null, 'configurar', { correo: b.correo, carpeta: b.carpeta, minutos: b.minutos }); return enviar(res, 200, correo.publica()); }
+    if (r1 === 'probar' && req.method === 'POST') {
+      const b = await leerCuerpo(req);
+      try { return enviar(res, 200, await correo.probar(correo.conClave(b))); }
+      catch (e) { return enviar(res, 200, { ok: false, error: /auth|credentials|Invalid/i.test(e.responseText || e.message) ? 'Gmail rechazó el usuario o la contraseña de aplicación' : e.message }); }
+    }
+    if (r1 === 'revisar' && req.method === 'POST') return enviar(res, 200, await correo.revisar());
+    // Crear los vencimientos que sugirió la IA para una correspondencia (confirmación del usuario)
+    if (r1 === 'vencimientos' && req.method === 'POST') {
+      exigir(u, 'vencimiento');
+      const c = await db.get('SELECT * FROM correspondencia WHERE id = ?', Number(r2_));
+      if (!c || !c.vencimientos_ia) throw new Rechazo(404, 'No hay vencimientos sugeridos');
+      const ids = [];
+      for (const v of JSON.parse(c.vencimientos_ia)) {
+        const r = await db.run('INSERT INTO vencimiento (proyecto_id, fecha, tipo, descripcion, estado, fuente) VALUES (?,?,?,?,?,?)', c.proyecto_id, v.fecha || null, v.tipo || 'Respuesta', v.descripcion, 'Pendiente', `Correo: ${c.asunto || ''}`.slice(0, 200));
+        ids.push(r.id); await auditar(u, 'vencimiento', r.id, 'crear', v);
+      }
+      await db.run('UPDATE correspondencia SET vencimientos_ia = NULL WHERE id = ?', c.id);
+      return enviar(res, 200, { ok: true, creados: ids.length });
+    }
+  }
+  if (r0 === 'adjuntos' && req.method === 'GET') return enviar(res, 200, await db.all('SELECT id, tabla, registro_id, nombre, tipo, tamano, fecha FROM adjunto WHERE tabla = ? AND registro_id = ? ORDER BY id', q.tabla, Number(q.registro_id)));
+  if (r0 === 'adjunto' && req.method === 'GET') {
+    const a = await db.get('SELECT * FROM adjunto WHERE id = ?', Number(r1));
+    const f = a && path.resolve(DATOS, a.ruta);
+    if (!a || !f.startsWith(path.resolve(DATOS)) || !fs.existsSync(f)) throw new Rechazo(404, 'El adjunto no está en este equipo');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(a.nombre)}`);
+    return enviar(res, 200, fs.readFileSync(f), a.tipo || 'application/octet-stream');
+  }
   if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
   if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 
@@ -456,7 +506,7 @@ const servidor = http.createServer(async (req, res) => {
   }
 });
 // Al arrancar desde la app de escritorio (main.js) se usa un puerto libre que se lee de aquí
-module.exports = iniciar().then(() => new Promise(ok => servidor.listen(PUERTO, '127.0.0.1', () => {
+module.exports = iniciar().then(() => correo.programar()).then(() => new Promise(ok => servidor.listen(PUERTO, '127.0.0.1', () => {
   const p = servidor.address().port;
   console.log(`SIGI listo en http://localhost:${p} (base: ${db.estado.modo})`);
   ok(p);

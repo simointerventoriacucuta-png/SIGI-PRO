@@ -53,7 +53,8 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
     - Exportar e importar con Excel (.xlsx), Word (actas e informes desde plantillas) y Microsoft Project (programa de obra y avance).
     - Autodesk (AutoCAD, Civil 3D, InfraWorks, Revit): leer alineamientos y abscisas para seguir el avance sobre el plano, por tramo e ítem.
     - Tableros tipo Power BI: publicar los datos (actas, avance, costos) para gráficos, y el asistente con Claude para analizarlos.
-14. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
+14. ✅ **Correo (Gmail)** (hecho): lectura periódica por IMAP con contraseña de aplicación; cada correo crea correspondencia con adjuntos, sin duplicados; la IA (Gemini) sugiere resumen, plazo y vencimientos que el usuario confirma.
+15. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
 
 ## Lo que no se copia de OPUS
 
