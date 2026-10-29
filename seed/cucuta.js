@@ -98,24 +98,23 @@ const INTERVENTORIA = [
   ['2.20', 'CBR INV-E-148-2013', 'UND', 13, 120000],
 ];
 
-module.exports = function sembrar(db) {
-  const ins = (tabla, o) => {
+module.exports = async function sembrar(db) {
+  const ins = async (tabla, o) => {
     const k = Object.keys(o);
-    return Number(db.prepare(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`).run(...Object.values(o)).lastInsertRowid);
+    return (await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(o))).id;
   };
-  const items = (contrato_id, filas) => {
+  const items = async (contrato_id, filas) => {
     let padre = null, orden = 0;
     for (const [codigo, descripcion, unidad, cantidad, b] of filas) {
       const cap = unidad == null;
       const vr = filas === OBRA ? 0 : b || 0;
       const sin_aiu = filas === OBRA && b ? 1 : 0;
-      const id = ins('item', { contrato_id, padre_id: cap ? null : padre, tipo: cap ? 0 : 1, codigo, descripcion, unidad: unidad || null, cantidad: cantidad || 0, vr_unitario: vr, sin_aiu, orden: ++orden });
+      const id = await ins('item', { contrato_id, padre_id: cap ? null : padre, tipo: cap ? 0 : 1, codigo, descripcion, unidad: unidad || null, cantidad: cantidad || 0, vr_unitario: vr, sin_aiu, orden: ++orden });
       if (cap) padre = id;
     }
   };
 
-  db.exec('BEGIN');
-  const p = ins('proyecto', {
+  const p = await ins('proyecto', {
     nombre: 'Interventoría Hibiscos - Cúcuta',
     entidad: 'E-Desarrollo S.A.S. (NIT 901.902.466-8)',
     ubicacion: 'San José de Cúcuta, Norte de Santander',
@@ -123,43 +122,42 @@ module.exports = function sembrar(db) {
     carpeta: CARPETA,
     memoria: CARPETA + '\\00 MEMORIA DEL PROYECTO\\memoria_grafo.json',
   });
-  const ci = ins('contrato', {
+  const ci = await ins('contrato', {
     proyecto_id: p, tipo: 'interventoria', numero: '058 de 2026', contratante: 'E-Desarrollo S.A.S.',
     contratista: 'SIMO S.A.S. - Servicio de Interventoría - Montaje y Obra Civil', nit: '829.002.886-5', representante: 'Daniela Andrea Jiménez Correa',
     objeto: 'Interventoría integral - vía Belén - Las Delicias (Hibiscos)', valor: 699995403.76, plazo: '10 meses desde el acta de inicio',
     fecha_firma: '2026-10-27', supervisor: 'Subgerencia de Ejecución de Proyectos - E-Desarrollo', iva_pct: 19, iva_base: 'total', estampillas_pct: 9.55,
     estado: 'Firmado - por legalizar', notas: 'Proceso INT-SMC-022-2026. Adjudicado por Res. 0193 del 22-oct-2026. Pago 90 % por actas según avance físico de la obra, 10 % en la liquidación.',
   });
-  const co = ins('contrato', {
+  const co = await ins('contrato', {
     proyecto_id: p, tipo: 'obra', numero: '(por confirmar)', contratante: 'E-Desarrollo S.A.S.', contratista: '(por confirmar)',
     objeto: 'Mejoramiento y construcción de la vía a El Carmen de Tonchalá - Hibiscos - Calle 35 Belén (1,612 km)', valor: 0,
     aiu_a: 24, aiu_i: 1, aiu_u: 4, iva_pct: 19, iva_base: 'utilidad', estado: 'Por confirmar',
     notas: 'Cantidades tomadas de la cláusula segunda del contrato de interventoría. Faltan los precios unitarios del contrato de obra.',
   });
-  items(co, OBRA);
-  items(ci, INTERVENTORIA);
+  await items(co, OBRA);
+  await items(ci, INTERVENTORIA);
 
-  const V = (fecha, tipo, descripcion, fuente) => ins('vencimiento', { proyecto_id: p, fecha, tipo, descripcion, responsable: 'SIMO', estado: 'Pendiente', fuente });
-  V('2026-10-30', 'Garantía', 'Entregar la garantía única: cumplimiento, salarios y calidad (10 % c/u = $69.999.540,38). No constituirla es causal resolutoria', 'Contrato 058, cláusula décima');
-  V(null, 'Documento', 'Conseguir el contrato firmado y la Resolución de adjudicación 0193 del 22-oct-2026', 'Memoria p002');
-  V(null, 'Legalización', 'Registro presupuestal (RP) y aprobación de la garantía, requisitos para el acta de inicio', 'Contrato 058, cláusula vigésima tercera');
-  V(null, 'Acta de inicio', 'Preparar el acta de inicio y presentar las hojas de vida del personal para aprobación', 'Contrato 058');
-  V(null, 'Obra', 'Identificar al contratista de obra, su contrato, valor, pólizas y APU; pedir diseños, licencias y permisos', 'Memoria p005');
-  V(null, 'Supervisión', 'Conocer el nombre del supervisor asignado (Subgerencia de Ejecución de Proyectos)', 'Contrato 058, cláusula décima cuarta');
-  V(null, 'Calidad', 'Entregar el plan de calidad (NTC ISO 9001 / 10005) al firmar el acta de inicio', 'Invitación, Formato 12');
-  V(null, 'Personal', 'Entregar el personal adicional (inspector, topógrafo, ingeniero ambiental) dentro de los 5 días hábiles siguientes al acta de inicio', 'Invitación, numeral 17.2.1');
+  const V = async (fecha, tipo, descripcion, fuente) => ins('vencimiento', { proyecto_id: p, fecha, tipo, descripcion, responsable: 'SIMO', estado: 'Pendiente', fuente });
+  await V('2026-10-30', 'Garantía', 'Entregar la garantía única: cumplimiento, salarios y calidad (10 % c/u = $69.999.540,38). No constituirla es causal resolutoria', 'Contrato 058, cláusula décima');
+  await V(null, 'Documento', 'Conseguir el contrato firmado y la Resolución de adjudicación 0193 del 22-oct-2026', 'Memoria p002');
+  await V(null, 'Legalización', 'Registro presupuestal (RP) y aprobación de la garantía, requisitos para el acta de inicio', 'Contrato 058, cláusula vigésima tercera');
+  await V(null, 'Acta de inicio', 'Preparar el acta de inicio y presentar las hojas de vida del personal para aprobación', 'Contrato 058');
+  await V(null, 'Obra', 'Identificar al contratista de obra, su contrato, valor, pólizas y APU; pedir diseños, licencias y permisos', 'Memoria p005');
+  await V(null, 'Supervisión', 'Conocer el nombre del supervisor asignado (Subgerencia de Ejecución de Proyectos)', 'Contrato 058, cláusula décima cuarta');
+  await V(null, 'Calidad', 'Entregar el plan de calidad (NTC ISO 9001 / 10005) al firmar el acta de inicio', 'Invitación, Formato 12');
+  await V(null, 'Personal', 'Entregar el personal adicional (inspector, topógrafo, ingeniero ambiental) dentro de los 5 días hábiles siguientes al acta de inicio', 'Invitación, numeral 17.2.1');
 
-  const P = (nombre, cargo, dedicacion, cedula, matricula, telefono, correo, estado = 'Propuesto') =>
+  const P = async (nombre, cargo, dedicacion, cedula, matricula, telefono, correo, estado = 'Propuesto') =>
     ins('personal', { proyecto_id: p, nombre, cargo, dedicacion, cedula, matricula, telefono, correo, estado });
-  P('Daniela Andrea Jiménez Correa', 'Directora de interventoría', 70, '1.098.817.511', '151037-0568678 STD', '318 504 1618', 'danielaandreajimenez@gmail.com');
-  P('José David Ortiz Bermúdez', 'Residente de interventoría', 100, '1.095.823.544', '68202-408347 STD', '350 342 0854', 'jose_daorbe@hotmail.com');
-  P('Lina Marcela Mendoza Contreras', 'Profesional SISO', 100, '1.096.217.405', '68834-396875 STD', '320 640 2308', null);
-  P('Carol Nataly Villar Herrera', 'Especialista en vías y/o pavimentos', 40, '1.032.481.795', '091037-0562713 CND', '311 238 9668', 'natalyvillar4@gmail.com');
-  P('(por vincular)', 'Inspector de obra', 100, null, null, null, null, 'Por vincular');
-  P('(por vincular)', 'Topógrafo', 100, null, null, null, null, 'Por vincular');
-  P('(por vincular)', 'Ingeniero ambiental', 100, null, null, null, null, 'Por vincular');
+  await P('Daniela Andrea Jiménez Correa', 'Directora de interventoría', 70, '1.098.817.511', '151037-0568678 STD', '318 504 1618', 'danielaandreajimenez@gmail.com');
+  await P('José David Ortiz Bermúdez', 'Residente de interventoría', 100, '1.095.823.544', '68202-408347 STD', '350 342 0854', 'jose_daorbe@hotmail.com');
+  await P('Lina Marcela Mendoza Contreras', 'Profesional SISO', 100, '1.096.217.405', '68834-396875 STD', '320 640 2308', null);
+  await P('Carol Nataly Villar Herrera', 'Especialista en vías y/o pavimentos', 40, '1.032.481.795', '091037-0562713 CND', '311 238 9668', 'natalyvillar4@gmail.com');
+  await P('(por vincular)', 'Inspector de obra', 100, null, null, null, null, 'Por vincular');
+  await P('(por vincular)', 'Topógrafo', 100, null, null, null, null, 'Por vincular');
+  await P('(por vincular)', 'Ingeniero ambiental', 100, null, null, null, null, 'Por vincular');
 
   for (const [amparo, vig] of [['Cumplimiento', 'Plazo + 6 meses'], ['Salarios, prestaciones e indemnizaciones', 'Plazo + 3 años'], ['Calidad del servicio', '5 años desde el acta de recibo final']])
-    ins('poliza', { proyecto_id: p, contrato: 'Interventoría 058', amparo, porcentaje: 10, valor: 69999540.38, estado: 'Pendiente', notas: `Vigencia: ${vig}. A favor de E-Desarrollo y del Municipio de Cúcuta (NIT 890.501.434-2)` });
-  db.exec('COMMIT');
+    await ins('poliza', { proyecto_id: p, contrato: 'Interventoría 058', amparo, porcentaje: 10, valor: 69999540.38, estado: 'Pendiente', notas: `Vigencia: ${vig}. A favor de E-Desarrollo y del Municipio de Cúcuta (NIT 890.501.434-2)` });
 };

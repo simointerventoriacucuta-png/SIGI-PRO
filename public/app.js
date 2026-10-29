@@ -56,6 +56,8 @@ const ICONOS = {
   correo: I('<rect x="3" y="7" width="26" height="18"/><path d="M3 8l13 10L29 8"/>', '#d18b00'),
   bitacora: I('<path d="M8 4h17v24H8z"/><path d="M8 4c-2 0-3 1-3 3v18c0 2 1 3 3 3"/><path d="M13 10h8M13 15h8"/>', '#5d4037'),
   ensayo: I('<path d="M12 4h8M13 4v9L6 25c-1 2 0 3 2 3h16c2 0 3-1 2-3l-7-12V4"/><path d="M9 20h14"/>', '#6a1b9a'),
+  nube: I('<path d="M9 24h15a6 6 0 0 0 0-12 8 8 0 0 0-15-2A7 7 0 0 0 9 24z"/>', '#1f5fa8'),
+  sincronizar: I('<path d="M6 14a10 10 0 0 1 18-5l2 3M26 18a10 10 0 0 1-18 5l-2-3"/><path d="M26 6v6h-6M6 26v-6h6"/>', '#2e7d32'),
   gasto: I('<rect x="4" y="8" width="24" height="16" rx="2"/><circle cx="16" cy="16" r="4"/><path d="M8 12v0M24 20v0"/>', '#d18b00'),
   costos: I('<circle cx="16" cy="16" r="12"/><path d="M16 4v12l9 6"/>', '#00796b'),
   balance: I('<path d="M4 28h24"/><rect x="7" y="16" width="4" height="12"/><rect x="14" y="10" width="4" height="18"/><rect x="21" y="5" width="4" height="23"/>', '#2e7d32'),
@@ -79,6 +81,7 @@ const CINTA = {
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
     ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
     ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')]]],
+    ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
   obra: ['Ejecución de obra', [
     ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')]]],
@@ -185,7 +188,7 @@ async function pintarDocs() {
     await vista(cont, x);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
-async function refrescar() { E.res = await api('resumen/' + E.pid); pintarLateral(); await pintarDocs(); estadoProyecto(); }
+async function refrescar() { E.res = await api('resumen/' + E.pid); pintarLateral(); await pintarDocs(); estadoProyecto(); pintarSync(); }
 
 // ---------- Edición en celda ----------
 // Al hacer clic en una celda .edit se cambia por un campo; al salir se guarda con fn(valor)
@@ -482,6 +485,53 @@ async function pintarLateral() {
   inp.addEventListener('input', () => { clearTimeout(buscar.t); buscar.t = setTimeout(buscar, 250); });
   if (E.buscar) buscar();
 }
+
+// ---------- Sincronización con la nube (Turso) ----------
+function pintarSync() {
+  const s = E.res?.sincronizacion || { modo: 'local' };
+  const el = $('#estado-sync');
+  if (s.modo !== 'nube') { el.textContent = '💻 Solo este equipo'; el.title = 'Los datos están solo en este computador'; el.className = 'sync local'; return; }
+  if (s.error) { el.textContent = '⚠️ Sin conexión'; el.title = s.error; el.className = 'sync error'; return; }
+  const hace = s.ultima ? Math.round((Date.now() - new Date(s.ultima)) / 1000) : null;
+  el.textContent = '☁️ Sincronizado' + (hace != null ? ` · hace ${hace < 60 ? hace + ' s' : Math.round(hace / 60) + ' min'}` : '');
+  el.title = 'Base en la nube: los cambios se comparten con los demás computadores'; el.className = 'sync ok';
+}
+async function sincronizarAhora() { await api('sync/ahora', 'POST'); await refrescar(); aviso('Sincronizado'); }
+async function dialogoSync() {
+  const s = await api('sync');
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Sincronización entre computadores</h3>
+  ${s.modo === 'nube' ? `<p>Este equipo está conectado a la nube:<br><b>${esc(s.url)}</b></p><p class="sub">${s.error ? '⚠️ ' + esc(s.error) : 'Última sincronización: ' + (s.ultima ? new Date(s.ultima).toLocaleString('es-CO') : '—')}</p>
+    <div class="acciones"><button class="btn" id="sync-quitar">Desconectar este equipo</button><button class="btn prim" value="ok">Cerrar</button></div>`
+  : `<p class="sub">Pegue los datos de su base en Turso (turso.tech → su base <b>sigi</b>). El token queda guardado solo en este computador.</p>
+    <div class="formulario" style="grid-template-columns:110px 1fr"><label>URL</label><input id="sync-url" placeholder="libsql://sigi-usuario.turso.io">
+    <label>Token</label><input id="sync-token" type="password" placeholder="eyJhbGciOi..."></div>
+    <p class="sub" id="sync-msg">Si la base de la nube está vacía, se suben los datos de este equipo. Si ya tiene datos (de otro computador), este equipo los descarga.</p>
+    <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn" id="sync-probar">Probar conexión</button><button class="btn prim" id="sync-activar">Conectar</button></div>`}`;
+  $('#dialogo').showModal();
+  const datos = () => ({ url: $('#sync-url').value.trim(), token: $('#sync-token').value.trim() });
+  const msg = t => ($('#sync-msg').innerHTML = t);
+  if ($('#sync-probar')) $('#sync-probar').onclick = async ev => {
+    ev.preventDefault(); msg('Probando…');
+    try { const r = await api('sync/probar', 'POST', datos()); msg(r.ok ? `✅ Conexión correcta. ${r.tieneDatos ? 'La nube ya tiene datos: este equipo los descargará.' : 'La nube está vacía: se subirán los datos de este equipo.'}` : '❌ No se pudo conectar'); }
+    catch (e) { msg('❌ ' + esc(e.message)); }
+  };
+  if ($('#sync-activar')) $('#sync-activar').onclick = async ev => {
+    ev.preventDefault(); msg('Conectando y sincronizando… (puede tardar unos segundos)');
+    try { const r = await api('sync/activar', 'POST', datos()); $('#dialogo').close(); await cargarProyectos(); aviso(r.yaTeniaDatos ? 'Conectado: datos descargados de la nube' : `Conectado: ${r.subidas} registros subidos a la nube`); }
+    catch (e) { msg('❌ ' + esc(e.message)); }
+  };
+  if ($('#sync-quitar')) $('#sync-quitar').onclick = async ev => {
+    ev.preventDefault();
+    if (!confirm('¿Desconectar este equipo de la nube? Volverá a usar sus datos locales anteriores.')) return;
+    await api('sync/desactivar', 'POST'); $('#dialogo').close(); await cargarProyectos(); aviso('Equipo desconectado de la nube');
+  };
+}
+// Trae los cambios de otros computadores cada 20 s (si no hay una celda en edición)
+setInterval(async () => {
+  if (E.res?.sincronizacion?.modo !== 'nube' || document.querySelector('td.edit input, td.edit select, dialog[open]')) return;
+  try { const antes = JSON.stringify(E.res); E.res = await api('resumen/' + E.pid); pintarSync(); if (JSON.stringify(E.res) !== antes) { pintarArbol(); pintarLateral(); } } catch {}
+}, 20000);
 
 // ---------- Proyectos ----------
 async function nuevoProyecto() {
