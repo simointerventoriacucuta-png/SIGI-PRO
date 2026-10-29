@@ -117,13 +117,37 @@ const CINTA = {
 function enPresupuesto() { return E.activo?.startsWith('presupuesto:'); }
 function enActa() { return E.activo?.startsWith('acta:'); }
 
+// Como en Excel: grupos de hasta 3 botones grandes; con más, los primeros 2 grandes y el resto chicos en columnas de 3
 function pintarCinta() {
-  $('#pestanas-cinta').innerHTML = Object.entries(CINTA).map(([k, [t]]) => `<button data-c="${k}" class="${k === E.cinta ? 'activo' : ''}">${t}</button>`).join('');
-  $('#grupos-cinta').innerHTML = CINTA[E.cinta][1].map(([g, botones], gi) => `<div class="grupo"><div class="grupo-botones">${
-    botones.map(([t, ic, fn, ok], bi) => `<button class="btn-cinta" data-g="${gi}" data-b="${bi}" ${!fn || (ok && !ok()) ? 'disabled' : ''}>${ICONOS[ic] || ''}<span>${t}</span></button>`).join('')
-  }</div><div class="grupo-nombre">${g}</div></div>`).join('');
+  $('#pestanas-cinta').innerHTML = `<button class="archivo" data-c="archivo">Archivo</button>` + Object.entries(CINTA).map(([k, [t]]) => `<button data-c="${k}" class="${k === E.cinta ? 'activo' : ''}">${t}</button>`).join('');
+  const boton = (b, gi, bi, chico) => { const [t, ic, fn, ok] = b; return `<button class="${chico ? 'btn-chico' : 'btn-cinta'}" data-g="${gi}" data-b="${bi}" title="${esc(t)}" ${!fn || (ok && !ok()) ? 'disabled' : ''}>${ICONOS[ic] || ''}<span>${t}</span></button>`; };
+  $('#grupos-cinta').innerHTML = CINTA[E.cinta][1].map(([g, botones], gi) => {
+    const grandes = botones.length > 3 ? 2 : botones.length;
+    let h = botones.slice(0, grandes).map((b, bi) => boton(b, gi, bi)).join('');
+    for (let i = grandes; i < botones.length; i += 3) h += `<div class="columna-chica">${botones.slice(i, i + 3).map((b, k) => boton(b, gi, i + k, true)).join('')}</div>`;
+    return `<div class="grupo"><div class="grupo-botones">${h}</div><div class="grupo-nombre">${g}</div></div>`;
+  }).join('');
 }
-$('#pestanas-cinta').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { E.cinta = b.dataset.c; pintarCinta(); } });
+$('#pestanas-cinta').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.c === 'archivo') { e.stopPropagation(); return menuArchivo(); }
+  E.cinta = b.dataset.c; $('.cinta').classList.remove('plegada'); pintarCinta();
+});
+$('#plegar-cinta').onclick = () => { $('.cinta').classList.toggle('plegada'); guardarLocal('cinta-plegada', $('.cinta').classList.contains('plegada') ? '1' : ''); };
+if (leerLocal('cinta-plegada')) $('.cinta').classList.add('plegada');
+// Menú Archivo (como la vista Backstage de Office)
+function menuArchivo() {
+  const m = $('#menu-archivo');
+  const ops = [['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
+    ['Informe mensual (Word)', informeMensual], null, ['Sincronización entre computadores', dialogoSync], ['Usuarios', () => abrir('usuarios')], ['Auditoría', () => abrir('auditoria')], ['Cambiar de usuario', elegirUsuario], null, ['Acerca de SIGI Pro', () => $('#btn-acerca').click()]];
+  m.innerHTML = ops.map((o, i) => (o ? `<button data-i="${i}">${o[0]}</button>` : '<hr>')).join('');
+  m.hidden = !m.hidden;
+  m.onclick = e => { const b = e.target.closest('[data-i]'); if (b) { m.hidden = true; ops[b.dataset.i][1](); } };
+}
+document.addEventListener('click', e => { if (!e.target.closest('#menu-archivo')) $('#menu-archivo').hidden = true; });
+$('#btn-actualizar').onclick = () => refrescar().then(() => aviso('Actualizado'));
+$('#btn-inicio-rapido').onclick = () => abrir('tablero');
+document.addEventListener('keydown', e => { if (e.key === 'F5') { e.preventDefault(); refrescar(); } });
 $('#grupos-cinta').addEventListener('click', e => {
   const b = e.target.closest('.btn-cinta'); if (!b || b.disabled) return;
   CINTA[E.cinta][1][b.dataset.g][1][b.dataset.b][2]();
@@ -196,6 +220,9 @@ $('#pestanas-doc').addEventListener('click', e => {
   E.activo = p.dataset.k; E.sel = null; pintarDocs();
 });
 async function pintarDocs() {
+  const tit = E.activo ? tituloDoc(E.activo) : '';
+  $('#ruta-doc').textContent = E.res ? [E.res.proyecto.nombre, tit].filter(Boolean).join('  ›  ') : '';
+  $('#titulo-ventana').textContent = (tit ? tit + ' - ' : '') + 'SIGI Pro';
   $('#pestanas-doc').innerHTML = E.docs.map(k => `<div class="pestana-doc ${k === E.activo ? 'activo' : ''}" data-k="${k}">${esc(tituloDoc(k))}<button class="cerrar" title="Cerrar">✕</button></div>`).join('');
   pintarCinta(); pintarArbol();
   const cont = $('#contenido-doc');
