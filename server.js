@@ -94,6 +94,9 @@ async function iniciar() {
   if (!(await db.all('PRAGMA table_info(usuario)')).some(c => c.name === 'correo')) await db.run('ALTER TABLE usuario ADD COLUMN correo TEXT');
   const colItem = (await db.all('PRAGMA table_info(item)')).map(c => c.name);
   for (const [c, t] of [['otrosi_id', 'INTEGER'], ['apu', 'TEXT']]) if (!colItem.includes(c)) await db.run(`ALTER TABLE item ADD COLUMN ${c} ${t}`);
+  // Bitácora tipo libreta: hora, incidentes, visitas y firmas (bases creadas antes de estas columnas)
+  const colBit = (await db.all('PRAGMA table_info(bitacora)')).map(c => c.name);
+  for (const c of ['hora', 'incidentes', 'visitas', 'firma_residente', 'firma_interventoria']) if (!colBit.includes(c)) await db.run(`ALTER TABLE bitacora ADD COLUMN ${c} TEXT`);
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)

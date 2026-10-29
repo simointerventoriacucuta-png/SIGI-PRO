@@ -156,7 +156,12 @@ CREATE TABLE IF NOT EXISTS bitacora (
   actividades TEXT,
   personal_obra INTEGER,
   equipos TEXT,
-  observaciones TEXT
+  observaciones TEXT,
+  hora TEXT,
+  incidentes TEXT,
+  visitas TEXT,
+  firma_residente TEXT,
+  firma_interventoria TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ensayo (

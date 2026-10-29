@@ -6,6 +6,7 @@
   <title>SIGI Pro</title>
   <link rel="icon" href="icono.png">
   <link rel="stylesheet" href="estilo.css">
+  <script>try { if (localStorage.getItem('sigi-tema') === 'oscuro') document.documentElement.dataset.tema = 'oscuro'; } catch (e) {}</script>
 </head>
 <body>
   <header class="barra-titulo">
@@ -21,6 +22,7 @@
     <button class="cab-btn" id="btn-asistente" title="Asistente de IA (Ctrl+J)">✦ Asistente</button>
     <button class="cab-btn" id="btn-campana" title="Avisos de los próximos 7 días">🔔<span id="campana-n" class="globo" hidden></span></button>
     <button class="cab-btn" id="btn-usuario" title="Cambiar de usuario">👤 <span id="usuario-nombre">Sin usuario</span></button>
+    <button class="cab-btn" id="btn-tema" type="button" title="Cambiar entre modo claro y oscuro" aria-pressed="false">🌙</button>
     <button class="ayuda" id="btn-acerca" title="Acerca de SIGI Pro">?</button>
     <div id="panel-avisos" class="panel-avisos" hidden></div>
   </header>
@@ -67,6 +69,8 @@
     <span class="zoom">Zoom <input type="range" id="zoom" min="80" max="130" value="100"></span>
   </footer>
 
+  <div id="carga" class="carga" aria-hidden="true"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
   <dialog id="dialogo"><form method="dialog" id="dialogo-form"></form></dialog>
   <script src="app.js"></script>
 </body>
