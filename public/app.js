@@ -47,6 +47,9 @@ const ICONOS = {
   item: I('<path d="M6 9h20M6 15h20M6 21h12"/><path d="M24 19v8M20 23h8"/>'),
   eliminar: I('<path d="M7 9h18M12 9V5h8v4M9 9l1 18h12l1-18M14 14v9M18 14v9"/>', '#c62828'),
   pegar: I('<path d="M10 6h12v4H10z"/><path d="M8 8H6v20h20V8h-2"/><path d="M11 16h10M11 21h10"/>', '#2e7d32'),
+  subir: I('<path d="M16 26V6M8 14l8-8 8 8"/>'),
+  bajar: I('<path d="M16 6v20M8 18l8 8 8-8"/>'),
+  copiar: I('<rect x="10" y="10" width="16" height="18"/><path d="M6 22V4h14"/>'),
   exportar: I('<path d="M6 20v8h20v-8M16 4v16M10 14l6 6 6-6"/>', '#2e7d32'),
   acta: I('<path d="M7 4h18v24H7z"/><path d="M11 10h10M11 15h10M11 20l3 3 6-6"/>'),
   aprobar: I('<circle cx="16" cy="16" r="12"/><path d="M10 16l4 4 8-8"/>', '#2e7d32'),
@@ -69,13 +72,13 @@ const ICONOS = {
 };
 
 // ---------- Estado ----------
-const E = { usuario: null, meta: null, proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
+const E = { deshacer: [], ir: null, filtro: {}, usuario: null, meta: null, proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
 const contrato = tipo => E.res?.contratos.find(c => c.tipo === tipo);
 
 // ---------- Cinta de opciones ----------
 // Grupo de edición del presupuesto: aparece en las pestañas Obra e Interventoría
 const EDITAR_PRES = ['Editar presupuesto', [['Nuevo capítulo', 'capitulo', () => nuevoItem(0), enPresupuesto], ['Nuevo ítem', 'item', () => nuevoItem(1), enPresupuesto],
-  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Importar Excel (.xlsx)', 'pegar', importarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
+  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Subir fila (Alt+↑)', 'subir', () => moverItem(-1), enPresupuesto], ['Bajar fila (Alt+↓)', 'bajar', () => moverItem(1), enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Importar Excel (.xlsx)', 'pegar', importarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
 // Documentos del acta: Excel y Word
 const DOC_ACTA = ['Documento del acta', [['Acta en Excel', 'exportar', exportarActa, enActa], ['Acta en Word', 'datos', () => (location.href = `/api/docx/acta/${E.activo.split(':')[1]}`), enActa]]];
 const ab = (tipo, vista) => () => abrir(vista + ':' + contrato(tipo)?.id);
@@ -91,7 +94,7 @@ const CINTA = {
     ['Avance en campo', [['Capturar avance', 'aprobar', capturarAvance], ['Capturas de avance', 'datos', () => abrir('avances')]]],
     ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')], ['Suspensiones', 'vencimiento', ab('obra', 'suspensiones')], ['Liquidación', 'balance', ab('obra', 'liquidacion')]]],
     EDITAR_PRES,
-    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa]]],
+    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa], ['Copiar acta anterior', 'copiar', copiarAnterior, enActa]]],
     DOC_ACTA,
     ['Programa y plano', [['Programa de obra (Project)', 'balance', () => abrir('programa')], ['Avance en el plano', 'mayores', () => abrir('plano')]]],
     ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')], ['Registro fotográfico', 'datos', () => abrir('fotos')]]],
@@ -238,7 +241,11 @@ async function pintarDocs() {
   const [t, x] = E.activo.split(':');
   try {
     const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion, requisiciones: vRequisiciones, rq: vRQ }[t];
+    const sc = cont.querySelector('.grilla-cont')?.scrollTop, scDoc = cont.scrollTop, mismo = pintarDocs.ult === E.activo;
     await vista(cont, x);
+    herramientasGrilla(cont);
+    if (mismo) { const g = cont.querySelector('.grilla-cont'); if (g && sc) g.scrollTop = sc; cont.scrollTop = scDoc; }
+    pintarDocs.ult = E.activo;
     marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
@@ -257,15 +264,123 @@ function editable(cont, alGuardar) {
     let hecho = false;
     const fin = async guardar => {
       if (hecho) return; hecho = true;
-      if (guardar && campo.value !== valor) { try { await alGuardar(td, tipo === 'num' ? num(campo.value) : campo.value); aviso('Guardado'); } catch (er) { aviso('Error: ' + er.message); } }
-      pintarDocs(); if (guardar) refrescarSilencioso();
+      if (guardar && campo.value !== valor) {
+        try {
+          await alGuardar(td, tipo === 'num' ? num(campo.value) : campo.value); aviso('Guardado · Ctrl+Z deshace');
+          // Pila de deshacer: se vuelve a guardar el valor anterior en la misma celda
+          E.deshacer.push({ vista: E.activo, nombre: td.dataset.c, fn: () => alGuardar(td, tipo === 'num' ? num(valor) : valor) });
+          if (E.deshacer.length > 50) E.deshacer.shift();
+        } catch (er) { aviso('Error: ' + er.message); }
+      }
+      await pintarDocs(); if (guardar) refrescarSilencioso();
+      if (E.ir) { const { id, c } = E.ir; E.ir = null; $(`#contenido-doc tr[data-id="${id}"] td.edit[data-c="${c}"]`)?.click(); }
+    };
+    // Enter/flechas: celda de abajo o de arriba en la misma columna; Tab: siguiente celda editable de la fila
+    const mover = ev => {
+      const tr = td.closest('tr'), filas = [...tr.parentNode.querySelectorAll('tr[data-id]')].filter(f => !f.hidden);
+      let dest = null;
+      if (ev.key === 'Tab') {
+        const celdas = [...tr.querySelectorAll('td.edit')], k = celdas.indexOf(td) + (ev.shiftKey ? -1 : 1);
+        dest = celdas[k] || null;
+      } else {
+        const paso = ev.key === 'ArrowUp' || (ev.key === 'Enter' && ev.shiftKey) ? -1 : 1;
+        for (let k = filas.indexOf(tr) + paso; k >= 0 && k < filas.length; k += paso) { const x = filas[k].querySelector(`td.edit[data-c="${td.dataset.c}"]`); if (x) { dest = x; break; } }
+      }
+      if (dest) E.ir = { id: dest.closest('tr').dataset.id, c: dest.dataset.c };
     };
     campo.addEventListener('blur', () => fin(true));
-    campo.addEventListener('keydown', ev => { if (ev.key === 'Enter') campo.blur(); if (ev.key === 'Escape') fin(false); });
+    campo.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') return fin(false);
+      if (ev.key === 'Enter' || ev.key === 'Tab' || (tipo !== 'select' && tipo !== 'date' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp'))) { ev.preventDefault(); mover(ev); campo.blur(); }
+    });
   });
 }
 async function refrescarSilencioso() { E.res = await api('resumen/' + E.pid); pintarArbol(); pintarLateral(); estadoProyecto(); }
 window.celda = (v, campo, tipo = 'text', extra = '') => `<td class="edit ${tipo === 'num' ? 'num' : ''}" data-c="${campo}" data-tipo="${tipo}" data-v="${esc(v ?? '')}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
+
+// ---------- Herramientas de toda grilla: buscar con resaltado, Excel, imprimir ----------
+function herramientasGrilla(cont) {
+  const g = cont.querySelector('.grilla-cont'); if (!g || cont.querySelector('.barra-grilla')) return;
+  const tabla = g.querySelector('table'), clave = E.activo;
+  const barra = document.createElement('div'); barra.className = 'barra-grilla';
+  barra.innerHTML = `<input type="search" class="buscar-grilla" placeholder="Filtrar filas… (Ctrl+F)" value="${esc(E.filtro[clave] || '')}"><span class="sub cuenta-grilla"></span><span class="esp"></span>
+    <button class="btn" data-h="excel" title="Descargar lo que se ve en la grilla como hoja de Excel (CSV)">⬇ Excel</button><button class="btn" data-h="imprimir" title="Imprimir esta vista">🖨 Imprimir</button>`;
+  g.before(barra);
+  const inp = barra.querySelector('input');
+  inp.oninput = () => { E.filtro[clave] = inp.value; filtrarGrilla(tabla, inp.value, barra.querySelector('.cuenta-grilla')); };
+  barra.onclick = e => { const b = e.target.closest('[data-h]'); if (!b) return; b.dataset.h === 'excel' ? excelGrilla(tabla) : window.print(); };
+  if (inp.value) inp.oninput();
+}
+function filtrarGrilla(tabla, texto, cuenta) {
+  const q = texto.trim().toLowerCase(), filas = [...tabla.tBodies[0].rows];
+  tabla.querySelectorAll('mark').forEach(m => m.replaceWith(m.textContent)); tabla.normalize();
+  let cap = null, capVisible = false, n = 0;
+  const cerrarCap = () => { if (cap) cap.hidden = !(capVisible || !q || cap.textContent.toLowerCase().includes(q)); };
+  for (const f of filas) {
+    if (f.classList.contains('cap')) { cerrarCap(); cap = f; capVisible = false; continue; }
+    const ok = !q || f.textContent.toLowerCase().includes(q);
+    f.hidden = !ok; if (ok) { capVisible = true; n++; }
+  }
+  cerrarCap();
+  if (q) for (const f of filas) if (!f.hidden) resaltar(f, q);
+  if (cuenta) cuenta.textContent = q ? `${n} fila(s) coinciden` : '';
+}
+function resaltar(nodo, q) {
+  const w = document.createTreeWalker(nodo, NodeFilter.SHOW_TEXT), lista = [];
+  while (w.nextNode()) if (w.currentNode.nodeValue.toLowerCase().includes(q)) lista.push(w.currentNode);
+  for (const t of lista) {
+    const v = t.nodeValue, i = v.toLowerCase().indexOf(q), m = document.createElement('mark');
+    m.textContent = v.slice(i, i + q.length);
+    const resto = t.splitText(i); resto.nodeValue = resto.nodeValue.slice(q.length); resto.before(m);
+  }
+}
+// Exporta las filas visibles (con subtotales y pie) a CSV que Excel abre con separador ;
+function excelGrilla(tabla) {
+  const celdaTxt = c => { const v = c.textContent.trim().replace(/^[●]\s*/, '').replace(/^\$\s*/, '').replace(/\s*%$/, ''); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  const lineas = ['sep=;'];
+  for (const f of tabla.rows) {
+    if (f.hidden) continue;
+    const out = []; for (const c of f.cells) { out.push(celdaTxt(c)); for (let k = 1; k < (c.colSpan || 1); k++) out.push(''); }
+    lineas.push(out.join(';'));
+  }
+  descargar(`${tituloDoc(E.activo).replace(/[^\wáéíóúñÁÉÍÓÚÑ.-]+/g, '_')}.csv`, '﻿' + lineas.join('\r\n'));
+}
+// Ctrl+Z deshace el último cambio hecho en una celda; Ctrl+F va al filtro de la grilla
+document.addEventListener('keydown', async e => {
+  if (!(e.ctrlKey || e.metaKey) || $('#dialogo').open) return;
+  const k = e.key.toLowerCase();
+  if (k === 'f' && $('#contenido-doc .buscar-grilla')) { e.preventDefault(); $('#contenido-doc .buscar-grilla').focus(); }
+  if (k === 'z' && !e.target.closest('input,textarea,select')) {
+    e.preventDefault();
+    const u = E.deshacer.pop(); if (!u) return aviso('Nada que deshacer');
+    try { await u.fn(); aviso('Deshecho: ' + u.nombre); if (E.activo !== u.vista) abrir(u.vista); else await pintarDocs(); refrescarSilencioso(); } catch (er) { aviso('No se pudo deshacer: ' + er.message); }
+  }
+});
+
+// Valor en letras (pesos colombianos), como se escribe en actas y cuentas de cobro
+function enLetras(valor) {
+  const U = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE',
+    'VEINTE', 'VEINTIÚN', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO', 'VEINTISÉIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE'];
+  const D = ['', '', '', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+  const C = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+  const menorMil = n => {
+    if (n === 100) return 'CIEN';
+    const r = n % 100, dec = r < 30 ? U[r] : D[Math.floor(r / 10)] + (r % 10 ? ' Y ' + U[r % 10] : '');
+    return [C[Math.floor(n / 100)], dec].filter(Boolean).join(' ');
+  };
+  const miles = n => { const m = Math.floor(n / 1000), r = n % 1000; return [m === 1 ? 'MIL' : m ? menorMil(m) + ' MIL' : '', r ? menorMil(r) : ''].filter(Boolean).join(' '); };
+  const entero = n => {
+    if (n === 0) return 'CERO';
+    const b = Math.floor(n / 1e12), mi = Math.floor(n / 1e6) % 1e6, r = n % 1e6;
+    return [b ? (b === 1 ? 'UN BILLÓN' : miles(b) + ' BILLONES') : '', mi ? (mi === 1 ? 'UN MILLÓN' : miles(mi) + ' MILLONES') : '', r ? miles(r) : ''].filter(Boolean).join(' ');
+  };
+  const v = Math.round(Math.abs(Number(valor) || 0) * 100), ent = Math.floor(v / 100), cts = v % 100;
+  const t = entero(ent), de = ent && !(ent % 1e6) ? ' DE' : '';
+  return (valor < 0 ? 'MENOS ' : '') + t + de + (ent === 1 ? ' PESO' : ' PESOS') + (cts ? ` CON ${entero(cts)} CENTAVOS` : '') + ' M/CTE';
+}
+window.enLetras = enLetras;
+// Semáforo del % ejecutado: verde hasta 90 %, ámbar hasta 100 %, rojo si supera lo contratado
+const semaforo = p => `<span class="semaforo ${p > 1 + 1e-9 ? 'rojo' : p >= 0.9 ? 'ambar' : p > 0 ? 'verde' : ''}" title="${p > 1 + 1e-9 ? 'Supera lo contratado' : p >= 0.9 ? 'Cerca del límite contratado' : 'Dentro de lo contratado'}">●</span>`;
 
 // ---------- Vistas ----------
 async function vTablero(cont) {
@@ -344,16 +459,37 @@ async function vPresupuesto(cont, id) {
   for (const it of d.items) if (it.tipo === 1 && it.padre_id) subt[it.padre_id] = (subt[it.padre_id] || 0) + it.cantidad * it.vr_unitario;
   cont.innerHTML = `<h2>Presupuesto · contrato de ${d.contrato.tipo === 'obra' ? 'obra' : 'interventoría'} ${esc(d.contrato.numero || '')}</h2>
   <p class="sub">${esc(d.contrato.contratista || '')} · clic en una celda para editar · seleccione una fila para insertar debajo o eliminar</p>
-  <div class="grilla-cont"><table class="grilla" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
+  <div class="grilla-cont"><table class="grilla congelar" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
   ${d.items.map(it => it.tipo === 0
     ? `<tr class="cap ${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}<td></td><td></td><td></td><td class="num">${pesos(subt[it.id] || 0)}</td><td></td><td></td><td></td><td></td></tr>`
     : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}<td class="num" ${it.cantidad_vigente !== it.cantidad ? 'style="color:#b26a00;font-weight:600"' : ''}>${fmt(it.cantidad_vigente)}</td><td class="num">${pesos(it.cantidad_vigente * it.vr_unitario)}</td><td>${it.otrosi_id || it.apu ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}</td></tr>`).join('')}
-  </tbody></table></div>
+  </tbody><tfoot><tr><td></td><td>${d.items.filter(i => i.tipo === 1).length} ítems · costo directo ${pesos(d.totales.costo_directo)}</td><td></td><td></td><td>TOTAL</td><td class="num">${pesos(d.totales.total)}</td><td></td><td>Vigente</td><td class="num">${pesos(d.totales_vigentes.total)}</td><td></td></tr></tfoot></table></div>
   <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Presupuesto original</h3>${tablaTotales(d.totales)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Vigente (con otrosíes firmados)</h3>${tablaTotales(d.totales_vigentes)}</div></div>`;
   const g = $('#g-pres');
   g.addEventListener('click', e => { const b = e.target.closest('[data-apu]'); if (b) editorApu(d.items.find(i => i.id === Number(b.dataset.apu))); });
   g.addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('td.edit input')) { E.sel = Number(tr.dataset.id); g.querySelectorAll('tr.sel').forEach(x => x.classList.remove('sel')); tr.classList.add('sel'); } });
   editable(g, (td, v) => api('t/item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'sin_aiu' ? (v === 'Sí' ? 1 : 0) : v }));
+  g.tabIndex = 0;
+  g.addEventListener('keydown', e => { if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.target.closest('input,select')) { e.preventDefault(); moverItem(e.key === 'ArrowUp' ? -1 : 1); } });
+}
+// Subir o bajar el ítem seleccionado dentro de su capítulo, o el capítulo completo con sus ítems
+async function moverItem(paso) {
+  if (!E.sel) return aviso('Seleccione primero una fila');
+  const cid = Number(E.activo.split(':')[1]), items = (await api('presupuesto/' + cid)).items;
+  const sel = items.find(i => i.id === E.sel); if (!sel) return;
+  let grupos;
+  if (sel.tipo === 0) {
+    // Capítulos con sus ítems; el orden final se reparte en el mismo orden de la lista
+    grupos = items.filter(i => i.tipo === 0).map(c => [c, ...items.filter(i => i.tipo === 1 && i.padre_id === c.id)]);
+  } else grupos = items.filter(i => i.tipo === 1 && i.padre_id === sel.padre_id).map(i => [i]);
+  const k = grupos.findIndex(b => b[0].id === sel.id), j = k + paso;
+  if (j < 0 || j >= grupos.length) return aviso('Ya está en el extremo');
+  const ordenes = grupos.flat().map(i => i.orden).sort((a, b) => a - b);
+  [grupos[k], grupos[j]] = [grupos[j], grupos[k]];
+  const unicos = new Set(ordenes).size === ordenes.length;
+  const cambios = grupos.flat().map((it, n) => [it, unicos ? ordenes[n] : ordenes[0] + n * 0.001]).filter(([it, o]) => it.orden !== o);
+  try { for (const [it, o] of cambios) await api('t/item/' + it.id, 'PUT', { orden: o }); await pintarDocs(); aviso(paso < 0 ? 'Fila subida' : 'Fila bajada'); }
+  catch (e) { aviso('Error: ' + e.message); }
 }
 async function nuevoItem(tipo) {
   const cid = Number(E.activo.split(':')[1]);
@@ -410,6 +546,10 @@ async function vActa(cont, id) {
   // Acta aprobada o posterior: celdas de solo lectura
   const celda = bloq ? (v, c, tipo = 'text', extra = '') => `<td class="${tipo === 'num' ? 'num' : ''}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>` : window.celda;
   const t = d.totales;
+  // Subtotales por capítulo (contratado, esta acta y acumulado)
+  const sc = {};
+  for (const f of d.filas) if (f.tipo === 1 && f.padre_id) { const s = sc[f.padre_id] ||= { a: 0, ac: 0, c: 0 }; s.a += f.vr_acta; s.ac += f.vr_acumulado; s.c += f.cantidad_vigente * f.vr_unitario; }
+  const it1 = d.filas.filter(f => f.tipo === 1), sum = k => it1.reduce((s, f) => s + (f[k] || 0), 0), contratado = it1.reduce((s, f) => s + f.cantidad_vigente * f.vr_unitario, 0);
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${esObra ? 'Acta parcial de obra' : 'Cuenta de cobro de interventoría'} N.º ${a.numero}</h2><span class="esp"></span><button class="btn clip" data-adj="acta:${a.id}">📎 Soportes y fotos</button></div>
   <p class="sub">${esc(d.contrato.contratista || '')} · contrato ${esc(d.contrato.numero || '')}</p>
   <table class="grilla" id="g-acta-cab" style="max-width:900px;margin-bottom:10px"><tbody><tr>
@@ -422,14 +562,14 @@ async function vActa(cont, id) {
     <div class="tarjeta"><div class="et">Acumulado con esta acta</div><div class="va">${pesos(t.acumulado.total)}</div></div>
     <div class="tarjeta"><div class="et">Ítems con mayor cantidad</div><div class="va">${d.filas.filter(f => f.tipo === 1 && f.saldo < -1e-9).length}</div><div class="no">Acumulado superior a lo contratado</div></div>
   </div>
-  <div class="grilla-cont"><table class="grilla" id="g-acta"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Vr. unit.</th><th class="num">Anterior</th>
+  <div class="grilla-cont"><table class="grilla congelar" id="g-acta"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Vr. unit.</th><th class="num">Anterior</th>
     <th class="num">Presentada</th><th class="num">Aprobada</th><th class="num">Acumulada</th><th class="num">Saldo</th><th class="num">% ejec.</th><th class="num">Vr. esta acta</th><th class="num">Vr. acumulado</th><th>Observación</th></tr></thead><tbody>
-  ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="13">${esc(f.descripcion)}</td></tr>`
+  ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="9">${esc(f.descripcion)}</td><td class="num">${sc[f.id]?.c ? pct(sc[f.id].ac / sc[f.id].c) : ''}</td><td class="num">${pesos(sc[f.id]?.a || 0)}</td><td class="num">${pesos(sc[f.id]?.ac || 0)}</td><td></td></tr>`
     : `<tr data-id="${f.id}" class="${f.saldo < -1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num" title="Original ${fmt(f.cantidad)}">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.vr_unitario)}</td>
       <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
-      <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
-  </tbody></table></div>
-  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
+      <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${semaforo(f.pct)} ${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
+  </tbody><tfoot><tr><td></td><td>Costo directo · presentado ${pesos(sum('vr_presentado'))}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num">${contratado ? pct(sum('vr_acumulado') / contratado) : ''}</td><td class="num">${pesos(sum('vr_acta'))}</td><td class="num">${pesos(sum('vr_acumulado'))}</td><td></td></tr></tfoot></table></div>
+  <p class="letras"><b>Valor de esta ${esObra ? 'acta' : 'cuenta'}:</b> ${pesos(t.acta.total)} · SON: ${enLetras(t.acta.total)}</p>  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
   <h3 style="font-size:13px;margin:16px 0 4px">Lista de chequeo documental <span class="sub" id="chequeo-res"></span></h3>
   <div id="chequeo-acta"></div>`;
   pintarChequeo(id, bloq);
@@ -1067,6 +1207,10 @@ function informeMensual() {
   if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
   location.href = `/api/docx/informe/${E.pid}?mes=${mes.trim()}`;
 }
+async function copiarAnterior() {
+  if (!confirm('¿Copiar las cantidades aprobadas del acta anterior a los ítems que en esta acta aún están en cero?')) return;
+  try { const r = await api(`acta/${E.activo.split(':')[1]}/copiar-anterior`, 'POST'); await refrescar(); aviso(`${r.items} ítem(s) copiados del acta ${r.desde}`); } catch (e) { aviso('Error: ' + e.message); }
+}
 function exportarActa() { location.href = `/api/xlsx/acta/${E.activo.split(':')[1]}`; }
 
 // Balance y mayores/menores
@@ -1087,10 +1231,13 @@ async function vMayores(cont, id) {
   if (!c.actas.length) return (cont.innerHTML = '<h2>Mayores y menores cantidades</h2><p class="sub">Se calcula con las actas aprobadas; aún no hay actas.</p>');
   const d = await api('acta/' + c.actas[c.actas.length - 1].id);
   const filas = d.filas.filter(f => f.tipo === 1);
+  let may = 0, men = 0, sinJ = 0;
+  for (const f of filas) { const v = (f.acumulado - f.cantidad_vigente) * f.vr_unitario; v > 0 ? (may += v) : (men += v); if (f.acumulado - f.cantidad_vigente > 1e-9 && !f.justificacion) sinJ++; }
   cont.innerHTML = `<h2>Mayores y menores cantidades</h2><p class="sub">Acumulado aprobado hasta el acta ${d.acta.numero} frente a lo contratado vigente (original + otrosíes firmados)</p>
-  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Contratada vigente</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th></tr></thead><tbody>
-  ${filas.map(f => { const dif = f.acumulado - f.cantidad_vigente; return `<tr class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td></tr>`; }).join('')}
-  </tbody></table></div>`;
+  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Contratada vigente</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th><th>Justificación técnica</th></tr></thead><tbody>
+  ${filas.map(f => { const dif = f.acumulado - f.cantidad_vigente; return `<tr data-id="${f.id}" class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${semaforo(f.pct)} ${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td>${celda(f.justificacion, 'justificacion', 'text', dif > 1e-9 && !f.justificacion ? 'style="background:#fff3e0" title="Mayor cantidad sin justificar"' : '')}</tr>`; }).join('')}
+  </tbody><tfoot><tr><td></td><td>Mayores ${pesos(may)} · menores ${pesos(men)} · mayores sin justificar: ${sinJ}</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num">${pesos(may + men)}</td><td></td></tr></tfoot></table></div>`;
+  editable(cont.querySelector('table.grilla'), (td, v) => api('t/item/' + td.closest('tr').dataset.id, 'PUT', { justificacion: v }));
 }
 
 // Gastos reales del contrato propio

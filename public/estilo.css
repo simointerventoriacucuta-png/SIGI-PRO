@@ -271,3 +271,30 @@ tr.tachado td { color: #999; text-decoration: line-through; }
 .prop-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 8px; margin-top: 6px; }
 .prop-campos label { font-size: 11px; color: var(--tenue); display: flex; flex-direction: column; }
 .prop-campos input { font-size: 12px; padding: 2px 4px; border: 1px solid var(--borde); border-radius: 3px; color: var(--texto); }
+
+/* Herramientas de grilla: filtro con resaltado, Excel, impresión */
+.barra-grilla { display: flex; align-items: center; gap: 6px; margin: 4px 0 6px; }
+.barra-grilla .esp { flex: 1; }
+.buscar-grilla { width: 260px; padding: 3px 6px; border: 1px solid var(--borde); border-radius: 3px; }
+.barra-grilla .sub { margin: 0; }
+.grilla mark { background: #ffe082; padding: 0; }
+/* Pie de totales siempre visible */
+.grilla-cont .grilla tfoot td { position: sticky; bottom: 0; z-index: 1; }
+/* Columnas congeladas: código y descripción */
+.grilla.congelar td:nth-child(1), .grilla.congelar th:nth-child(1) { position: sticky; left: 0; min-width: 64px; max-width: 64px; overflow: hidden; text-overflow: ellipsis; background: #fff; z-index: 1; }
+.grilla.congelar td:nth-child(2), .grilla.congelar th:nth-child(2) { position: sticky; left: 64px; min-width: 240px; max-width: 320px; background: #fff; z-index: 1; box-shadow: 1px 0 0 var(--borde); }
+.grilla.congelar th:nth-child(-n+2) { background: #f0f0f0; z-index: 3; }
+.grilla.congelar tr.cap td:nth-child(-n+2) { background: #eef3f9; }
+.grilla.congelar tr.sel td:nth-child(-n+2) { background: var(--sel); }
+.grilla.congelar tfoot td:nth-child(-n+2) { background: #f7f7f7; z-index: 2; }
+/* Semáforo por fila */
+.semaforo { color: #c8c8c8; font-size: 10px; }
+.semaforo.verde { color: var(--verde); } .semaforo.ambar { color: var(--ambar); } .semaforo.rojo { color: var(--rojo); }
+.letras { margin: 8px 0; padding: 6px 10px; border: 1px solid var(--borde); background: #fafafa; border-radius: 3px; }
+@media print {
+  .barra-titulo, .cinta, .explorador, .pestanas-doc, .barra-grilla, .barra-estado, .lateral, #pasos-acta { display: none !important; }
+  body, .area, .documentos, .contenido-doc { display: block !important; height: auto !important; overflow: visible !important; }
+  .grilla-cont { max-height: none !important; overflow: visible !important; border: 0; }
+  .grilla th, .grilla.congelar td, .grilla tfoot td { position: static !important; }
+  .grilla { font-size: 10px; }
+}
