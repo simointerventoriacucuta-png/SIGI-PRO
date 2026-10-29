@@ -21,12 +21,12 @@ const TABLAS = {
   suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
-  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id',
+  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
-    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id']],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
   adjunto: [['adjunto_dato', 'adjunto_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id'], ['suspension', 'contrato_id'], ['liquidacion', 'contrato_id']],
@@ -41,8 +41,8 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  especialista: ['adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
   administrativo: ['adjunto', 'otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
@@ -534,6 +534,44 @@ async function asistenteSSE(req, res, pid, u) {
   ev('fin', {}); res.end();
 }
 
+// ---------- Captura de avance ----------
+// Cantidad según la unidad del ítem: m = largo, m² = largo × ancho, m³ = largo × ancho × espesor, und = piezas
+function cantidadAvance(d, unidad) {
+  const largo = d.largo ?? (d.abs_ini != null && d.abs_fin != null ? Math.abs(d.abs_fin - d.abs_ini) : null);
+  const u = String(unidad || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const f = [largo, u.includes('2') || u.includes('3') ? d.ancho : null, u.includes('3') ? d.espesor : null, d.piezas].filter(v => v != null && v !== '');
+  return f.length ? r2(f.reduce((s, v) => s * Number(v), 1)) : 0;
+}
+async function prepararAvance(d, u, antes) {
+  // Una captura ya incluida en un acta cerrada no se puede cambiar ni borrar
+  if (antes?.acta_id && bloqueada(await db.get('SELECT * FROM acta WHERE id = ?', antes.acta_id))) throw new Rechazo(409, 'Esta captura ya está en un acta aprobada y no se puede cambiar');
+  if (!antes) d.usuario = u.nombre;
+  const v = { ...antes, ...d };
+  if (v.item_id) {
+    const it = await db.get('SELECT contrato_id, unidad FROM item WHERE id = ?', v.item_id);
+    if (!it) throw new Rechazo(400, 'El ítem no existe');
+    if (!antes || d.item_id != null) d.contrato_id = it.contrato_id;
+    if ((d.cantidad == null || d.cantidad === '') && ['largo', 'ancho', 'espesor', 'piezas', 'abs_ini', 'abs_fin', 'item_id'].some(k => k in d)) d.cantidad = cantidadAvance(v, it.unidad);
+  }
+}
+// Suma (signo 1) o resta (−1) la captura a la cantidad presentada de su acta, si el acta sigue abierta
+async function moverAvance(av, signo) {
+  if (!av?.acta_id || !av.item_id || av.estado === 'Rechazado') return;
+  const a = await db.get('SELECT * FROM acta WHERE id = ?', av.acta_id);
+  if (!a || bloqueada(a)) return;
+  await db.run(`INSERT INTO acta_item (acta_id, item_id, cant_presentada, cant_aprobada) VALUES (?, ?, ?, 0)
+    ON CONFLICT (acta_id, item_id) DO UPDATE SET cant_presentada = MAX(0, ROUND(cant_presentada + excluded.cant_presentada, 4))`, a.id, av.item_id, signo * (av.cantidad || 0));
+}
+// Busca el acta abierta (borrador o con observaciones) cuyo periodo incluye la fecha de la captura
+async function vincularAvance(id) {
+  const av = await db.get('SELECT * FROM avance WHERE id = ?', id);
+  if (!av || av.acta_id || av.estado === 'Rechazado' || !av.contrato_id || !av.item_id) return;
+  const a = await db.get(`SELECT id FROM acta WHERE contrato_id = ? AND estado IN ('Borrador', 'Con observaciones') AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY numero DESC LIMIT 1`, av.contrato_id, av.fecha, av.fecha);
+  if (!a) return;
+  await db.run('UPDATE avance SET acta_id = ? WHERE id = ?', a.id, id);
+  await moverAvance({ ...av, acta_id: a.id }, 1);
+}
+
 // Plazo en días hábiles (sin sábados ni domingos; los festivos se ajustan a mano). PQRS: 15 días, Ley 1755 de 2015
 function diasHabiles(desde, n) {
   const d = new Date(desde + 'T00:00:00Z');
@@ -595,6 +633,7 @@ async function informeMensual(pid, mes) {
     director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría',
     // Datos adicionales para la guía del informe del interventor y/o contratista
     numero: (() => { const ob = r.contratos.find(c => c.tipo === 'obra') || r.contratos[0]; const i = ob?.fecha_inicio; return i ? Math.max(1, (+mes.slice(0, 4) - +i.slice(0, 4)) * 12 + (+mes.slice(5, 7) - +i.slice(5, 7)) + 1) : +mes.slice(5, 7); })(),
+    capturas: await db.all(`SELECT a.*, i.codigo, i.descripcion item, i.unidad FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado' AND a.fecha BETWEEN ? AND ? ORDER BY a.fecha`, pid, ini, fin),
     bitacora: await del('bitacora'), ensayos: await del('ensayo'), correspondencia: await del('correspondencia'),
     personal: await db.all('SELECT * FROM personal WHERE proyecto_id = ? ORDER BY id', pid),
     gastos: await db.all('SELECT g.* FROM gasto g JOIN contrato c ON c.id = g.contrato_id WHERE c.proyecto_id = ? AND g.fecha BETWEEN ? AND ?', pid, ini, fin),
@@ -701,7 +740,8 @@ async function api(req, res, url) {
   }
   if (r0 === 'plano') {
     const alineamientos = (await db.all('SELECT * FROM alineamiento WHERE proyecto_id = ? ORDER BY id', Number(r1))).map(a => ({ ...a, puntos: JSON.parse(a.puntos || '[]') }));
-    return enviar(res, 200, { alineamientos, tramos: await db.all('SELECT * FROM tramo WHERE proyecto_id = ? ORDER BY alineamiento_id, abs_ini', Number(r1)) });
+    return enviar(res, 200, { alineamientos, tramos: await db.all('SELECT * FROM tramo WHERE proyecto_id = ? ORDER BY alineamiento_id, abs_ini', Number(r1)),
+      avances: await db.all(`SELECT a.*, i.codigo, i.descripcion item, i.unidad FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado' AND a.abs_ini IS NOT NULL ORDER BY a.fecha`, Number(r1)) });
   }
   // Power BI: /api/bi/:proyecto/:conjunto.csv o .json  (en Power BI: Obtener datos → Web)
   if (r0 === 'bi') {
@@ -753,6 +793,9 @@ async function api(req, res, url) {
     await auditar(u, 'adjunto', r.id, 'crear', { tabla: b.tabla, registro_id: b.registro_id, nombre: b.nombre, tamano: datos.length });
     return enviar(res, 200, await db.get('SELECT * FROM adjunto WHERE id = ?', r.id));
   }
+  if (r0 === 'avances') return enviar(res, 200, await db.all(`SELECT a.*, i.codigo, i.descripcion item, i.unidad, i.cantidad cant_contratada, ac.numero acta_numero, ac.estado acta_estado,
+    (SELECT COUNT(*) FROM adjunto f WHERE f.tabla = 'avance' AND f.registro_id = a.id) fotos
+    FROM avance a LEFT JOIN item i ON i.id = a.item_id LEFT JOIN acta ac ON ac.id = a.acta_id WHERE a.proyecto_id = ? ORDER BY a.fecha DESC, a.id DESC`, Number(r1)));
   if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
   if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 
@@ -836,8 +879,12 @@ async function api(req, res, url) {
       if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'suspension' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM suspension WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
+      if (tabla === 'avance') await prepararAvance(d, u);
       const k = Object.keys(d);
       const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
+      if (tabla === 'avance') await vincularAvance(r.id);
+      // Un acta nueva recoge las capturas de avance pendientes de su periodo
+      if (tabla === 'acta') for (const a of await db.all('SELECT id FROM avance WHERE contrato_id = ? AND acta_id IS NULL AND estado <> ? AND fecha >= COALESCE(?, fecha) AND fecha <= COALESCE(?, fecha)', d.contrato_id, 'Rechazado', d.desde ?? null, d.hasta ?? null)) await vincularAvance(a.id);
       const nuevo = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, r.id);
       await auditar(u, tabla, r.id, 'crear', d);
       return enviar(res, 200, nuevo);
@@ -850,7 +897,13 @@ async function api(req, res, url) {
       if (tabla === 'social' && d.tipo === 'PQRS' && !antes.plazo && !d.plazo) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'item' && d.vr_unitario != null && d.vr_unitario !== antes.vr_unitario) await precioLibre(id);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
-      if (k.length) await db.run(`UPDATE ${tabla} SET ${k.map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
+      if (tabla === 'avance') { await prepararAvance(d, u, antes); if (k.length) await moverAvance(antes, -1); }
+      if (k.length) await db.run(`UPDATE ${tabla} SET ${Object.keys(d).map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
+      if (tabla === 'avance' && k.length) {
+        const av = await db.get('SELECT * FROM avance WHERE id = ?', id);
+        if (av.estado === 'Rechazado') await db.run('UPDATE avance SET acta_id = NULL WHERE id = ?', id);
+        else if (av.acta_id) await moverAvance(av, 1); else await vincularAvance(id);
+      }
       const cambio = diferencia(antes, d);
       if (Object.keys(cambio).length) await auditar(u, tabla, id, 'editar', cambio);
       return enviar(res, 200, await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id));
@@ -858,6 +911,7 @@ async function api(req, res, url) {
     if (req.method === 'DELETE' && id) {
       if (tabla === 'acta') await actaEditable(id);
       const antes = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id);
+      if (tabla === 'avance' && antes) { await prepararAvance({}, u, antes); await moverAvance(antes, -1); }
       await borrar(tabla, id); await auditar(u, tabla, id, 'borrar', antes);
       return enviar(res, 200, { ok: true });
     }

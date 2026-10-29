@@ -394,3 +394,23 @@ CREATE TABLE IF NOT EXISTS adjunto_dato (
   adjunto_id INTEGER PRIMARY KEY REFERENCES adjunto(id) ON DELETE CASCADE,
   datos BLOB
 );
+
+-- Captura de avance en campo: memoria de cantidades por abscisa con registro fotográfico.
+-- La cantidad entra sola a la cantidad presentada del acta en borrador del periodo.
+CREATE TABLE IF NOT EXISTS avance (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  contrato_id INTEGER REFERENCES contrato(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  abs_ini REAL,                   -- metros
+  abs_fin REAL,
+  largo REAL, ancho REAL, espesor REAL, piezas REAL,
+  cantidad REAL DEFAULT 0,
+  descripcion TEXT,
+  estado TEXT DEFAULT 'Reportado', -- Reportado, Verificado, Rechazado
+  acta_id INTEGER,                 -- acta a la que se sumó
+  usuario TEXT,
+  lat REAL, lon REAL
+);

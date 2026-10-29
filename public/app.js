@@ -88,6 +88,7 @@ const CINTA = {
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
   obra: ['Ejecución de obra', [
+    ['Avance en campo', [['Capturar avance', 'aprobar', capturarAvance], ['Capturas de avance', 'datos', () => abrir('avances')]]],
     ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')], ['Suspensiones', 'vencimiento', ab('obra', 'suspensiones')], ['Liquidación', 'balance', ab('obra', 'liquidacion')]]],
     EDITAR_PRES,
     ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa]]],
@@ -148,6 +149,7 @@ function menuArchivo() {
 document.addEventListener('click', e => { if (!e.target.closest('#menu-archivo')) $('#menu-archivo').hidden = true; });
 $('#btn-actualizar').onclick = () => refrescar().then(() => aviso('Actualizado'));
 $('#btn-inicio-rapido').onclick = () => abrir('tablero');
+$('#btn-captura').onclick = () => capturarAvance();
 document.addEventListener('keydown', e => { if (e.key === 'F5') { e.preventDefault(); refrescar(); } });
 $('#grupos-cinta').addEventListener('click', e => {
   const b = e.target.closest('.btn-cinta'); if (!b || b.disabled) return;
@@ -165,7 +167,7 @@ function pintarArbol() {
     h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length) + n('suspensiones:' + ob.id, '⏸️ Suspensiones', 0, ob.suspendido ? 'suspendido' : ob.suspensiones.length) + n('liquidacion:' + ob.id, '🏁 Liquidación', 0, ob.liquidacion?.estado || '');
     h += n('', '📁 Actas parciales', 0, ob.actas.length, true) + ob.actas.map(a => n('acta:' + a.id, `Acta ${a.numero}`, 1, a.estado)).join('');
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
-    h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
+    h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('avances', '📍 Capturas de avance', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
     h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:ambiental', 'Fichas PAGA / PMA', 1) + n('tabla:pmt', 'PMT (tránsito)', 1)
       + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
       + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1);
@@ -190,7 +192,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico',
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance',
     suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
@@ -198,7 +200,7 @@ function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
   if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control' }[x];
-  if (t === 'programa' || t === 'plano') return 'obra';
+  if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
   return E.res?.contratos.find(c => String(c.id) === x)?.tipo;
@@ -230,7 +232,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
     await vista(cont, x);
     marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
@@ -602,6 +604,9 @@ async function vPlano(cont) {
       let h = `<polyline points="${a.puntos.map(P).join(' ')}" fill="none" stroke="#9e9e9e" stroke-width="10" stroke-linecap="round"/>`;
       for (const t of d.tramos.filter(t => t.alineamiento_id === a.id && t.abs_ini != null && t.abs_fin != null))
         h += `<polyline points="${tramoPolilinea(a, t.abs_ini, t.abs_fin).map(P).join(' ')}" fill="none" stroke="${colorAvance(t.avance)}" stroke-width="10"><title>${esc(t.nombre || '')} ${abscisa(t.abs_ini)} – ${abscisa(t.abs_fin)}: ${fmt(t.avance, 0)} % ${esc(t.actividad || '')}</title></polyline>`;
+      // Lo ejecutado según las capturas de campo, como línea fina sobre el eje
+      if (a === d.alineamientos[0]) for (const v of d.avances.filter(v => v.abs_fin != null))
+        h += `<polyline points="${tramoPolilinea(a, Math.min(v.abs_ini, v.abs_fin), Math.max(v.abs_ini, v.abs_fin)).map(P).join(' ')}" fill="none" stroke="${v.estado === 'Verificado' ? '#1b5e20' : '#0d47a1'}" stroke-width="4"><title>${esc(v.codigo || '')} ${esc(v.item || '')}: ${fmt(v.cantidad)} ${esc(v.unidad || '')} · ${abscisa(v.abs_ini)} – ${abscisa(v.abs_fin)} · ${fechaLarga(v.fecha)} · ${esc(v.estado)}</title></polyline>`;
       for (let k = Math.ceil(a.abs_ini / 100) * 100; k <= a.abs_ini + a.longitud; k += 100) {
         const [px, py] = P(puntoEn(a, k)).split(',');
         h += `<circle cx="${px}" cy="${py}" r="2.5" fill="#333"/>` + (k % 500 === 0 ? `<text x="${+px + 6}" y="${+py - 6}" font-size="11">${abscisa(k)}</text>` : '');
@@ -615,7 +620,7 @@ async function vPlano(cont) {
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Avance en el plano</h2><span class="esp"></span>
     <button class="btn" id="pl-importar">Importar eje (LandXML)</button><button class="btn prim" id="pl-tramo" ${d.alineamientos.length ? '' : 'disabled'}>+ Tramo</button></div>
   <p class="sub">En Civil 3D: Salida → Exportar a LandXML; en InfraWorks: Exportar → LandXML. Pase el mouse sobre un tramo para ver su avance.
-    <span class="leyenda"><i style="background:#bdbdbd"></i>Sin iniciar <i style="background:#f9a825"></i>En ejecución <i style="background:#7cb342"></i>≥ 50 % <i style="background:#2e7d32"></i>Terminado</span></p>
+    <span class="leyenda"><i style="background:#bdbdbd"></i>Sin iniciar <i style="background:#f9a825"></i>En ejecución <i style="background:#7cb342"></i>≥ 50 % <i style="background:#2e7d32"></i>Terminado <i style="background:#0d47a1;height:4px"></i>Capturas de campo <i style="background:#1b5e20;height:4px"></i>Verificadas</span></p>
   ${svg}
   <div class="grilla-cont"><table class="grilla" id="g-tramos"><thead><tr><th>Eje</th><th>Tramo</th><th class="num">Abscisa inicial (m)</th><th class="num">Abscisa final (m)</th><th>Actividad</th><th class="num">Avance %</th><th>Fecha</th><th>Notas</th><th></th></tr></thead><tbody>
   ${d.tramos.map(t => `<tr data-id="${t.id}">${celda(t.alineamiento_id, 'alineamiento_id', 'select', `data-op="${opAl}"`).replace(/>\d+<\/td>$/, `>${esc(d.alineamientos.find(a => a.id === t.alineamiento_id)?.nombre || '')}</td>`)}${celda(t.nombre, 'nombre')}${celda(t.abs_ini, 'abs_ini', 'num')}${celda(t.abs_fin, 'abs_fin', 'num')}${celda(t.actividad, 'actividad')}${celda(t.avance, 'avance', 'num')}${celda(t.fecha, 'fecha', 'date')}${celda(t.notas, 'notas')}<td class="acciones"><button class="btn clip" data-adj="tramo:${t.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${t.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin tramos</td></tr>'}
@@ -784,6 +789,95 @@ async function vFotos(cont) {
   $('#f-frente').onchange = e => { E.fotoFrente = e.target.value; pintarDocs(); };
   $('#adj-archivos').onchange = async e => { await subirArchivos([...e.target.files], 'proyecto', E.pid); pintarDocs(); };
   cont.onclick = async e => { const q = e.target.closest('[data-quitar]'); if (q) { e.preventDefault(); if (confirm('¿Eliminar esta foto?')) { await api('t/adjunto/' + q.dataset.quitar, 'DELETE'); pintarDocs(); } } };
+}
+
+// ---------- Captura de avance en campo ----------
+// Abscisa escrita como K0+125,5 o en metros → metros
+const metros = s => { const t = String(s ?? '').trim().replace(',', '.'); const m = t.match(/^k?\s*(\d+)\s*\+\s*([\d.]+)$/i); return m ? +m[1] * 1000 + +m[2] : t === '' ? null : Number(t); };
+// Igual que en el servidor: m = largo, m² = largo × ancho, m³ = largo × ancho × espesor, und = piezas
+function calcularCantidad(v, unidad) {
+  const largo = v.largo ?? (v.abs_ini != null && v.abs_fin != null ? Math.abs(v.abs_fin - v.abs_ini) : null);
+  const u = String(unidad || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const f = [largo, u.includes('2') || u.includes('3') ? v.ancho : null, u.includes('3') ? v.espesor : null, v.piezas].filter(x => x != null && !Number.isNaN(x));
+  return f.length ? Math.round(f.reduce((s, x) => s * x, 1) * 100) / 100 : 0;
+}
+async function capturarAvance() {
+  const ob = contrato('obra'); if (!ob) return aviso('No hay contrato de obra');
+  const items = (await api('presupuesto/' + ob.id)).items.filter(i => i.tipo === 1);
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>📷 Capturar avance de obra</h3>
+    <p class="sub">Registre lo ejecutado con su memoria de cantidades y fotos. La cantidad se suma sola a la cantidad presentada del acta en borrador del periodo; la interventoría la verifica después.</p>
+    <div class="formulario captura">
+      <label>Ítem</label><select id="av-item"><option value="">— Elija el ítem —</option>${items.map(i => `<option value="${i.id}" data-u="${esc(i.unidad || '')}">${esc(i.codigo || '')} · ${esc(i.descripcion)} (${esc(i.unidad || '')})</option>`).join('')}</select>
+      <label>Fecha</label><input id="av-fecha" type="date" value="${hoyISO()}">
+      <label>Frente</label><input id="av-frente" placeholder="Calle 5, margen derecha…">
+      <label>Abscisas</label><div class="fila-campos"><input id="av-ini" placeholder="Inicial K0+100"><input id="av-fin" placeholder="Final K0+160"></div>
+      <label>Medidas</label><div class="fila-campos"><input id="av-largo" placeholder="Largo (m)"><input id="av-ancho" placeholder="Ancho (m)"><input id="av-espesor" placeholder="Espesor (m)"><input id="av-piezas" placeholder="Piezas / veces"></div>
+      <label>Cantidad</label><div class="fila-campos"><input id="av-cant" placeholder="Se calcula sola"><span id="av-und" class="sub"></span><span id="av-memoria" class="sub"></span></div>
+      <label>Descripción</label><input id="av-desc" placeholder="Qué se ejecutó">
+      <label>Fotos</label><div class="fila-campos"><label class="btn prim">Tomar o elegir fotos…<input id="av-fotos" type="file" accept="image/*" capture="environment" multiple hidden></label><span id="av-nfotos" class="sub">Ninguna (obligatorio al menos una)</span></div>
+      <label></label><label class="sub"><input type="checkbox" id="av-gps" checked> Guardar mi ubicación (GPS)</label>
+    </div>
+    <p class="sub" id="av-msg"></p>
+    <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" id="av-guardar">Guardar captura</button></div>`;
+  $('#dialogo').showModal();
+  let manual = false, fotos = [];
+  const valores = () => { const n = id => { const v = $(id).value.trim().replace(',', '.'); return v === '' ? null : Number(v); }; return { abs_ini: metros($('#av-ini').value), abs_fin: metros($('#av-fin').value), largo: n('#av-largo'), ancho: n('#av-ancho'), espesor: n('#av-espesor'), piezas: n('#av-piezas') }; };
+  const recalcular = () => {
+    const op = $('#av-item').selectedOptions[0], und = op?.dataset.u || '', v = valores();
+    $('#av-und').textContent = und;
+    if (!manual) $('#av-cant').value = op?.value ? fmt(calcularCantidad(v, und)) : '';
+    const largo = v.largo ?? (v.abs_ini != null && v.abs_fin != null ? Math.abs(v.abs_fin - v.abs_ini) : null);
+    $('#av-memoria').textContent = largo != null ? `= ${[largo, v.ancho, v.espesor, v.piezas].filter(x => x != null).map(x => fmt(x)).join(' × ')}` : '';
+  };
+  f.querySelectorAll('input, select').forEach(e => e.addEventListener('input', recalcular));
+  $('#av-cant').addEventListener('input', () => (manual = $('#av-cant').value.trim() !== ''));
+  $('#av-fotos').onchange = e => { fotos = [...e.target.files]; $('#av-nfotos').textContent = `${fotos.length} foto(s)`; };
+  $('#av-guardar').onclick = async ev => {
+    ev.preventDefault();
+    const msg = t => ($('#av-msg').textContent = t);
+    if (!$('#av-item').value) return msg('Elija el ítem.');
+    if (!fotos.length) return msg('Agregue al menos una foto del avance.');
+    const v = valores(), cantidad = num($('#av-cant').value);
+    if (!cantidad) return msg('La cantidad es cero: escriba las medidas o la cantidad.');
+    msg('Guardando…');
+    try {
+      const gps = $('#av-gps').checked ? await ubicacion() : {};
+      const av = await api('t/avance', 'POST', { proyecto_id: E.pid, item_id: Number($('#av-item').value), fecha: $('#av-fecha').value, frente: $('#av-frente').value, descripcion: $('#av-desc').value, ...v, ...gps, ...(manual ? { cantidad } : {}) });
+      let n = 0;
+      for (const foto of fotos) {
+        msg(`Subiendo foto ${++n} de ${fotos.length}…`);
+        await api('adjunto', 'POST', { proyecto_id: E.pid, tabla: 'avance', registro_id: av.id, categoria: 'Foto', fecha: av.fecha, frente: av.frente, abscisa: [abscisa(av.abs_ini), abscisa(av.abs_fin)].filter(Boolean).join(' – '), descripcion: av.descripcion || $('#av-item').selectedOptions[0].text, ...gps, ...(await prepararArchivo(foto)) });
+      }
+      $('#dialogo').close();
+      const acta = av.acta_id ? E.res.contratos.flatMap(c => c.actas).find(a => a.id === av.acta_id) : null;
+      aviso(`Avance guardado: ${fmt(av.cantidad)} ${$('#av-und').textContent}` + (av.acta_id ? ` sumados al acta ${acta?.numero ?? ''}` : ' (sin acta en borrador: entrará a la próxima acta del periodo)'));
+      await refrescar();
+    } catch (e) { msg('Error: ' + e.message); }
+  };
+}
+async function vAvances(cont) {
+  const lista = await api('avances/' + E.pid);
+  const porItem = {};
+  for (const a of lista.filter(a => a.estado !== 'Rechazado')) { const k = a.item_id; porItem[k] = porItem[k] || { codigo: a.codigo, item: a.item, unidad: a.unidad, contratada: a.cant_contratada, total: 0, verificado: 0 }; porItem[k].total += a.cantidad || 0; if (a.estado === 'Verificado') porItem[k].verificado += a.cantidad || 0; }
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Capturas de avance en campo</h2><span class="esp"></span><button class="btn prim" id="av-nuevo">📷 Capturar avance</button></div>
+  <p class="sub">Cada captura suma su cantidad a la cantidad presentada del acta en borrador del periodo. Al marcarla Rechazada se descuenta. Una vez el acta se aprueba, sus capturas quedan cerradas.</p>
+  <h3 class="h3">Ejecutado en campo por ítem</h3>
+  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Ítem</th><th>Und</th><th class="num">Contratada</th><th class="num">Reportado en campo</th><th class="num">Verificado</th><th class="num">% del contratado</th></tr></thead><tbody>
+  ${Object.values(porItem).map(i => `<tr class="${i.total > i.contratada + 1e-9 ? 'alerta' : ''}"><td>${esc(i.codigo)}</td><td>${esc(i.item)}</td><td>${esc(i.unidad)}</td><td class="num">${fmt(i.contratada)}</td><td class="num">${fmt(i.total)}</td><td class="num">${fmt(i.verificado)}</td><td class="num">${i.contratada ? pct(i.total / i.contratada) : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="sub">Aún no hay capturas</td></tr>'}
+  </tbody></table></div>
+  <h3 class="h3">Capturas</h3>
+  <div class="grilla-cont"><table class="grilla" id="g-avances"><thead><tr><th>Fecha</th><th>Ítem</th><th>Frente</th><th>Abscisas</th><th>Memoria</th><th class="num">Cantidad</th><th>Und</th><th>Estado</th><th>Acta</th><th>Reportó</th><th></th></tr></thead><tbody>
+  ${lista.map(a => `<tr data-id="${a.id}" class="${a.estado === 'Rechazado' ? 'tachado' : ''}"><td>${fechaLarga(a.fecha)}</td><td>${esc(a.codigo || '')} ${esc(a.item || '')}</td><td>${esc(a.frente || '')}</td><td>${abscisa(a.abs_ini)}${a.abs_fin != null ? ' – ' + abscisa(a.abs_fin) : ''}</td>
+    <td>${[a.largo ?? (a.abs_fin != null && a.abs_ini != null ? Math.abs(a.abs_fin - a.abs_ini) : null), a.ancho, a.espesor, a.piezas].filter(x => x != null).map(x => fmt(x)).join(' × ')}</td><td class="num">${fmt(a.cantidad)}</td><td>${esc(a.unidad || '')}</td>
+    ${a.acta_estado && E.meta.estados_acta.indexOf(a.acta_estado) >= E.meta.bloqueo ? `<td>${esc(a.estado)}</td>` : celda(a.estado, 'estado', 'select', 'data-op="Reportado|Verificado|Rechazado"')}
+    <td>${a.acta_numero ? 'Acta ' + a.acta_numero : '<span class="sub">pendiente</span>'}</td><td>${esc(a.usuario || '')}</td>
+    <td class="acciones"><button class="btn clip" data-adj="avance:${a.id}" title="Fotos">📷</button><button class="btn" data-borrar="${a.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="11" class="sub">Pulse "Capturar avance" para registrar lo ejecutado con fotos</td></tr>'}
+  </tbody></table></div>`;
+  const g = $('#g-avances');
+  editable(g, (td, v) => api('t/avance/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar esta captura? Su cantidad se descuenta del acta en borrador.')) { try { await api('t/avance/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
+  $('#av-nuevo').onclick = capturarAvance;
 }
 
 // ---------- Usuarios y auditoría ----------

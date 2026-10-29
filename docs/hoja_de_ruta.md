@@ -44,6 +44,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
 10. **Comparativo de precios no previstos** (M3 y M4): APU frente a referencias, con mínimo, máximo y promedio.
 11. ✅ **Suspensiones y reinicios** con recálculo del plazo; **liquidación** con balance final y devolución de retenciones.
 12. Aportes de M1:
+    - ✅ **Captura de avance en campo** (hecho: ítem, abscisas, largo × ancho × espesor × piezas, fotos obligatorias y GPS; la cantidad entra sola al acta en borrador, se pinta en el plano y va al informe mensual).
     - **Memoria de cantidades por ítem y acta:** abscisa inicial y final, costado, largo, ancho, espesor y piezas, o una fórmula; con fotos y estado medida → verificada → aprobada.
     - **Importador de Excel** que deja escoger el rango y asignar columnas, y reconoce capítulos.
     - ✅ **Adjuntos por registro** (hecho: 📎 en pólizas, actas, otrosíes, suspensiones, gastos, tramos, SST, ambiental, social, PMT, bitácora, ensayos, correspondencia y contratos; registro fotográfico con fecha, frente, abscisa, punto fijo y GPS, incluido en el informe mensual).

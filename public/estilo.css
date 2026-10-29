@@ -252,3 +252,7 @@ td.acciones { white-space: nowrap; }
 .confirmar { border: 1px solid #d18b00; background: #fff8e6; border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
 .confirmar .acciones { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 .aviso-clave { background: #fff8e6; border: 1px solid #d18b00; padding: 6px 8px; border-radius: 6px; }
+.formulario.captura { grid-template-columns: 110px 1fr; max-width: 720px; }
+.fila-campos { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fila-campos input { flex: 1; min-width: 90px; }
+tr.tachado td { color: #999; text-decoration: line-through; }
