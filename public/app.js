@@ -290,12 +290,14 @@ async function vPresupuesto(cont, id) {
   for (const it of d.items) if (it.tipo === 1 && it.padre_id) subt[it.padre_id] = (subt[it.padre_id] || 0) + it.cantidad * it.vr_unitario;
   cont.innerHTML = `<h2>Presupuesto · contrato de ${d.contrato.tipo === 'obra' ? 'obra' : 'interventoría'} ${esc(d.contrato.numero || '')}</h2>
   <p class="sub">${esc(d.contrato.contratista || '')} · clic en una celda para editar · seleccione una fila para insertar debajo o eliminar</p>
-  <div class="grilla-cont"><table class="grilla" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th></tr></thead><tbody>
+  <div class="grilla-cont"><table class="grilla" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
   ${d.items.map(it => it.tipo === 0
-    ? `<tr class="cap ${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}<td></td><td></td><td></td><td class="num">${pesos(subt[it.id] || 0)}</td><td></td></tr>`
-    : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}</tr>`).join('')}
-  </tbody></table></div>${tablaTotales(d.totales)}`;
+    ? `<tr class="cap ${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}<td></td><td></td><td></td><td class="num">${pesos(subt[it.id] || 0)}</td><td></td><td></td><td></td><td></td></tr>`
+    : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}<td class="num" ${it.cantidad_vigente !== it.cantidad ? 'style="color:#b26a00;font-weight:600"' : ''}>${fmt(it.cantidad_vigente)}</td><td class="num">${pesos(it.cantidad_vigente * it.vr_unitario)}</td><td>${it.otrosi_id || it.apu ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Presupuesto original</h3>${tablaTotales(d.totales)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Vigente (con otrosíes firmados)</h3>${tablaTotales(d.totales_vigentes)}</div></div>`;
   const g = $('#g-pres');
+  g.addEventListener('click', e => { const b = e.target.closest('[data-apu]'); if (b) editorApu(d.items.find(i => i.id === Number(b.dataset.apu))); });
   g.addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('td.edit input')) { E.sel = Number(tr.dataset.id); g.querySelectorAll('tr.sel').forEach(x => x.classList.remove('sel')); tr.classList.add('sel'); } });
   editable(g, (td, v) => api('t/item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'sin_aiu' ? (v === 'Sí' ? 1 : 0) : v }));
 }
@@ -355,7 +357,7 @@ async function vActa(cont, id) {
   <div class="grilla-cont"><table class="grilla" id="g-acta"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Vr. unit.</th><th class="num">Anterior</th>
     <th class="num">Presentada</th><th class="num">Aprobada</th><th class="num">Acumulada</th><th class="num">Saldo</th><th class="num">% ejec.</th><th class="num">Vr. esta acta</th><th class="num">Vr. acumulado</th><th>Observación</th></tr></thead><tbody>
   ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="13">${esc(f.descripcion)}</td></tr>`
-    : `<tr data-id="${f.id}" class="${f.saldo < -1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.vr_unitario)}</td>
+    : `<tr data-id="${f.id}" class="${f.saldo < -1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num" title="Original ${fmt(f.cantidad)}">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.vr_unitario)}</td>
       <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
       <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
   </tbody></table></div>
@@ -387,11 +389,92 @@ async function vOtrosis(cont, cid) {
   <div class="grilla-cont"><table class="grilla" id="g-otrosi"><thead><tr><th>N.º</th><th>Fecha</th><th>Tipo</th><th class="num">Valor adicionado</th><th class="num">Días de prórroga</th><th>Objeto / justificación</th><th>Estado</th><th>¿Pólizas ajustadas?</th><th></th></tr></thead><tbody>
   ${c.otrosis.map(o => `<tr data-id="${o.id}"><td>${o.numero}</td>${celda(o.fecha, 'fecha', 'date')}${celda(o.tipo, 'tipo', 'select', 'data-op="Adición|Prórroga|Adición y prórroga|Modificación|Suspensión"')}${celda(o.valor, 'valor', 'num')}${celda(o.dias, 'dias', 'num')}${celda(o.objeto, 'objeto')}${celda(o.estado, 'estado', 'select', 'data-op="En trámite|Firmado|Anulado"')}${celda(o.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"', )}<td><button class="btn" data-borrar="${o.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin otrosíes</td></tr>'}
   </tbody></table></div>
-  <p class="sub">Solo los otrosíes en estado Firmado suman al valor y al plazo vigentes. Mientras las pólizas no estén ajustadas, la campana lo recuerda.</p>`;
+  <p class="sub">Solo los otrosíes en estado Firmado suman al valor y al plazo vigentes. Mientras las pólizas no estén ajustadas, la campana lo recuerda.</p>
+  <div id="o-cant"></div>`;
   const g = $('#g-otrosi');
   editable(g, (td, v) => api('t/otrosi/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este otrosí?')) { try { await api('t/otrosi/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
   $('#o-nuevo').onclick = async () => { try { await api('t/otrosi', 'POST', { contrato_id: c.id, fecha: hoyISO(), estado: 'En trámite' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+  if (c.otrosis.length) await cantidadesOtrosi($('#o-cant'), c);
+}
+// Cantidades que cada otrosí suma o resta por ítem, e ítems no previstos
+async function cantidadesOtrosi(cont, c) {
+  const items = (await api('presupuesto/' + c.id)).items, porId = new Map(items.map(i => [i.id, i]));
+  const filas = (await Promise.all(c.otrosis.map(o => api('t/otrosi_item?otrosi_id=' + o.id)))).flat();
+  const otr = new Map(c.otrosis.map(o => [o.id, o]));
+  const opOtrosi = c.otrosis.map(o => `<option value="${o.id}">${o.numero} · ${esc(o.estado)}</option>`).join('');
+  const opItems = items.filter(i => i.tipo === 1).map(i => `<option value="${i.id}">${esc(i.codigo)} · ${esc((i.descripcion || '').slice(0, 70))}</option>`).join('');
+  cont.innerHTML = `<div class="barra-herr" style="margin-top:14px"><h3 style="margin:0;font-size:14px">Cantidades por otrosí</h3><span class="esp"></span><button class="btn prim" id="o-np">+ Nuevo ítem no previsto</button></div>
+  <div class="grilla-cont"><table class="grilla" id="g-oitem"><thead><tr><th>Otrosí</th><th>Estado</th><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Cantidad (+/−)</th><th class="num">Vigente</th><th class="num">Vr. unitario</th><th></th></tr></thead><tbody>
+  ${filas.map(f => { const it = porId.get(f.item_id) || {}, o = otr.get(f.otrosi_id) || {}; return `<tr data-id="${f.id}"><td>${o.numero ?? ''}</td><td>${esc(o.estado)}</td><td>${esc(it.codigo)}</td><td>${esc(it.descripcion)}</td><td>${esc(it.unidad)}</td><td class="num">${fmt(it.cantidad)}</td>${celda(f.cantidad, 'cantidad', 'num')}<td class="num">${fmt(it.cantidad_vigente)}</td><td class="num">${fmt(it.vr_unitario)}</td><td>${it.otrosi_id ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}<button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`; }).join('') || '<tr><td colspan="10" class="sub">Sin cantidades modificadas</td></tr>'}
+  </tbody></table></div>
+  <div class="barra-herr" style="margin-top:8px">Otrosí <select id="oi-otrosi">${opOtrosi}</select>
+    Ítem <select id="oi-item" style="max-width:420px">${opItems}</select> Cantidad (+/−) <input id="oi-cant" size="8"> <button class="btn" id="oi-agregar">Agregar</button></div>
+  <p class="sub">Cantidad contratada vigente = original + cantidades de los otrosíes firmados. Las actas aprobadas conservan su valor.</p>`;
+  const g = $('#g-oitem');
+  editable(g, (td, v) => api('t/otrosi_item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => {
+    const a = e.target.closest('[data-apu]'); if (a) return editorApu(porId.get(Number(a.dataset.apu)));
+    const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Quitar esta cantidad del otrosí?')) { try { await api('t/otrosi_item/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } }
+  });
+  $('#oi-agregar').onclick = async () => {
+    const q = num($('#oi-cant').value); if (!q) return aviso('Escriba la cantidad (negativa para restar)');
+    try { await api('t/otrosi_item', 'POST', { otrosi_id: Number($('#oi-otrosi').value), item_id: Number($('#oi-item').value), cantidad: q }); refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+  };
+  $('#o-np').onclick = () => nuevoNoPrevisto(c, items, opOtrosi);
+}
+// Ítem no previsto: código NP-xx en el capítulo de no previstos, ligado al otrosí, con su APU
+function nuevoNoPrevisto(c, items, opOtrosi) {
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Nuevo ítem no previsto</h3>
+  <p><label>Otrosí <select id="np-otrosi">${opOtrosi}</select></label></p>
+  <p><label>Descripción <input id="np-desc" size="50"></label></p>
+  <p><label>Unidad <input id="np-und" value="UND" size="6"></label> <label>Cantidad <input id="np-cant" value="0" size="8"></label></p>
+  <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" value="si" id="np-ok">Crear y editar APU</button></div>`;
+  $('#dialogo').showModal();
+  $('#np-ok').onclick = async ev => {
+    ev.preventDefault();
+    try {
+      const n = Math.max(0, ...items.map(i => Number(/^NP-(\d+)$/.exec(i.codigo || '')?.[1] || 0))) + 1;
+      const cap = items.find(i => i.tipo === 0 && i.codigo === 'NP') || await api('t/item', 'POST', { contrato_id: c.id, tipo: 0, codigo: 'NP', descripcion: 'ÍTEMS NO PREVISTOS' });
+      const otrosi = Number($('#np-otrosi').value);
+      const it = await api('t/item', 'POST', { contrato_id: c.id, padre_id: cap.id, tipo: 1, codigo: 'NP-' + String(n).padStart(2, '0'), descripcion: $('#np-desc').value || 'Ítem no previsto', unidad: $('#np-und').value, cantidad: 0, vr_unitario: 0, otrosi_id: otrosi, apu: JSON.stringify({ renglones: [] }), orden: cap.orden + n / 1000 });
+      const q = num($('#np-cant').value);
+      if (q) await api('t/otrosi_item', 'POST', { otrosi_id: otrosi, item_id: it.id, cantidad: q });
+      $('#dialogo').close(); await refrescar(); editorApu(it);
+    } catch (er) { aviso('Error: ' + er.message); }
+  };
+}
+// Editor de APU: materiales, equipo, mano de obra y transporte; el total es el valor unitario
+const GRUPOS_APU = ['Materiales', 'Equipo', 'Mano de obra', 'Transporte'];
+function editorApu(it) {
+  if (!it) return;
+  let apu; try { apu = JSON.parse(it.apu || '{}'); } catch { apu = {}; }
+  const r = apu.renglones || [], f = $('#dialogo-form');
+  const parcial = x => (x.cantidad || 0) * (x.precio || 0), total = () => r.reduce((s, x) => s + parcial(x), 0);
+  const pintar = () => {
+    f.innerHTML = `<h3>APU · ${esc(it.codigo)} ${esc(it.descripcion)} (${esc(it.unidad || '')})</h3>
+    <div class="grilla-cont" style="max-height:55vh"><table class="grilla" id="g-apu"><thead><tr><th>Grupo</th><th>Descripción</th><th>Und</th><th class="num">Cant. / rend.</th><th class="num">Precio</th><th class="num">Parcial</th><th></th></tr></thead><tbody>
+    ${GRUPOS_APU.map(gr => { const de = r.map((x, k) => [x, k]).filter(([x]) => x.grupo === gr);
+      return `<tr class="cap"><td colspan="5">${gr}</td><td class="num">${pesos(de.reduce((s, [x]) => s + parcial(x), 0))}</td><td><button class="btn" data-mas="${gr}" title="Agregar renglón">+</button></td></tr>`
+        + de.map(([x, k]) => `<tr data-k="${k}"><td></td>${celda(x.descripcion, 'descripcion')}${celda(x.unidad, 'unidad')}${celda(x.cantidad, 'cantidad', 'num')}${celda(x.precio, 'precio', 'num')}<td class="num">${pesos(parcial(x))}</td><td><button class="btn" data-quitar="${k}">✕</button></td></tr>`).join(''); }).join('')}
+    <tr class="cap"><td colspan="5">VALOR UNITARIO</td><td class="num" id="apu-total">${pesos(total())}</td><td></td></tr></tbody></table></div>
+    <div class="acciones"><button class="btn" value="no">Cerrar</button><button class="btn prim" value="si" id="apu-ok">Guardar APU</button></div>`;
+    $('#g-apu').addEventListener('click', e => {
+      const m = e.target.closest('[data-mas]'), q = e.target.closest('[data-quitar]'), td = e.target.closest('td.edit');
+      if (m) { e.preventDefault(); r.push({ grupo: m.dataset.mas, descripcion: '', unidad: '', cantidad: 0, precio: 0 }); return pintar(); }
+      if (q) { e.preventDefault(); r.splice(Number(q.dataset.quitar), 1); return pintar(); }
+      if (!td || td.querySelector('input')) return;
+      const campo = document.createElement('input'); campo.value = td.dataset.v; td.textContent = ''; td.appendChild(campo); campo.focus(); campo.select();
+      campo.addEventListener('blur', () => { r[td.closest('tr').dataset.k][td.dataset.c] = td.dataset.tipo === 'num' ? num(campo.value) : campo.value; pintar(); });
+      campo.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); campo.blur(); } });
+    });
+    $('#apu-ok').onclick = async ev => {
+      ev.preventDefault();
+      try { await api('t/item/' + it.id, 'PUT', { apu: JSON.stringify({ renglones: r }), vr_unitario: Math.round(total() * 100) / 100 }); $('#dialogo').close(); aviso('APU guardado'); refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+    };
+  };
+  pintar(); if (!$('#dialogo').open) $('#dialogo').showModal();
 }
 
 // ---------- Usuarios y auditoría ----------
@@ -494,9 +577,9 @@ async function vMayores(cont, id) {
   if (!c.actas.length) return (cont.innerHTML = '<h2>Mayores y menores cantidades</h2><p class="sub">Se calcula con las actas aprobadas; aún no hay actas.</p>');
   const d = await api('acta/' + c.actas[c.actas.length - 1].id);
   const filas = d.filas.filter(f => f.tipo === 1);
-  cont.innerHTML = `<h2>Mayores y menores cantidades</h2><p class="sub">Acumulado aprobado hasta el acta ${d.acta.numero} frente a lo contratado</p>
-  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th></tr></thead><tbody>
-  ${filas.map(f => { const dif = f.acumulado - f.cantidad; return `<tr class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td></tr>`; }).join('')}
+  cont.innerHTML = `<h2>Mayores y menores cantidades</h2><p class="sub">Acumulado aprobado hasta el acta ${d.acta.numero} frente a lo contratado vigente (original + otrosíes firmados)</p>
+  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Contratada vigente</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th></tr></thead><tbody>
+  ${filas.map(f => { const dif = f.acumulado - f.cantidad_vigente; return `<tr class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td></tr>`; }).join('')}
   </tbody></table></div>`;
 }
 
