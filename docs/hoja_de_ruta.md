@@ -16,12 +16,12 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
 ## Siguiente, por prioridad
 
 1. **Sincronización entre computadores.** Base en la nube con copia local (Turso/libSQL) o Google Drive.
-2. **Usuarios, roles y auditoría** (M3, M4, M2 cap. 5):
+2. ✅ **Usuarios, roles y auditoría** (hecho) (M3, M4, M2 cap. 5):
    - Roles: director, residente, especialistas, administrativo y entidad (solo consulta).
    - Matriz de permisos vista × operación.
    - Bitácora de quién cambió qué.
    - Un documento aprobado queda bloqueado.
-3. **Estados con barra de pasos** (M3) para actas y solicitudes del contratista:
+3. ✅ **Estados con barra de pasos** (hecho) (M3) para actas y solicitudes del contratista:
    - Borrador → Radicada → En revisión → Con observaciones → Aprobada interventoría → Avalada entidad → Pagada.
 4. **Otrosíes y modificaciones** (M2 9.1):
    - Adición de valor y prórroga, con historial versionado del valor y del plazo.
@@ -49,7 +49,11 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
     - **Adjuntos por registro** en actas, mediciones, ensayos, pólizas y oficios.
     - Valor en letras en las actas.
     - Semáforo de aprobación por fila.
-13. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
+13. **Integraciones con otras aplicaciones** (pedido del usuario):
+    - Exportar e importar con Excel (.xlsx), Word (actas e informes desde plantillas) y Microsoft Project (programa de obra y avance).
+    - Autodesk (AutoCAD, Civil 3D, InfraWorks, Revit): leer alineamientos y abscisas para seguir el avance sobre el plano, por tramo e ítem.
+    - Tableros tipo Power BI: publicar los datos (actas, avance, costos) para gráficos, y el asistente con Claude para analizarlos.
+14. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
 
 ## Lo que no se copia de OPUS
 
