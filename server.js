@@ -254,19 +254,60 @@ async function validarEstado(u, antes, d) {
     throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
 }
 
-// ---------- Asistente con Claude ----------
-// La clave de la API se toma de ANTHROPIC_API_KEY o de datos/asistente.json (solo en este equipo)
+// ---------- Asistente (Claude u Ollama) ----------
+// La configuración vive en datos/asistente.json (solo en este equipo):
+//   { proveedor: 'claude' | 'ollama', clave, ollama_url, ollama_modelo }
+// Variables de entorno opcionales: ANTHROPIC_API_KEY, OLLAMA_HOST, OLLAMA_MODEL.
 const ARCH_ASISTENTE = path.join(DATOS, 'asistente.json');
-const claveAsistente = () => process.env.ANTHROPIC_API_KEY || (fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')).clave : null);
-async function asistente(proyectoId, mensajes, u) {
-  const clave = claveAsistente();
-  if (!clave) throw new Rechazo(400, 'Falta la clave de la API de Claude: el director la configura en Inicio → Asistente');
-  const Anthropic = require('@anthropic-ai/sdk');
-  const cliente = new Anthropic({ apiKey: clave });
+const OLLAMA_URL = 'http://127.0.0.1:11434';
+function confAsistente() {
+  let c = {};
+  try { if (fs.existsSync(ARCH_ASISTENTE)) c = JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')); } catch {}
+  return {
+    proveedor: c.proveedor === 'ollama' ? 'ollama' : 'claude',
+    clave: process.env.ANTHROPIC_API_KEY || c.clave || null,
+    ollama_url: String(c.ollama_url || process.env.OLLAMA_HOST || OLLAMA_URL).replace(/\/+$/, ''),
+    ollama_modelo: c.ollama_modelo || process.env.OLLAMA_MODEL || null,
+  };
+}
+const asistenteListo = c => (c.proveedor === 'ollama' ? !!c.ollama_modelo : !!c.clave);
+
+// Modelos descargados en el servidor de Ollama
+async function modelosOllama(url) {
+  let r;
+  try { r = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(5000) }); }
+  catch { throw new Rechazo(502, `No hay respuesta de Ollama en ${url}. Verifique que Ollama esté abierto (ollama serve).`); }
+  if (!r.ok) throw new Rechazo(502, `Ollama respondió ${r.status} en ${url}`);
+  return ((await r.json()).models || []).map(m => m.name);
+}
+
+async function promptAsistente(proyectoId, u) {
   const r = await resumen(proyectoId);
   const datos = { proyecto: r.proyecto, hoy: r.hoy, vencimientos: r.vencimientos,
     contratos: r.contratos.map(c => ({ tipo: c.tipo, numero: c.numero, contratista: c.contratista, valor: c.valor, presupuesto: c.presupuesto, ejecutado: c.ejecutado, gastado: c.gastado,
       actas: c.actas.map(a => ({ numero: a.numero, estado: a.estado, desde: a.desde, hasta: a.hasta, valor: a.valor, acumulado: a.acumulado })) })) };
+  return `Eres el asistente de SIGI Pro, un sistema de gestión de interventoría de obras viales en Colombia.
+Respondes en español, con precisión y de forma breve, como un ingeniero de interventoría con experiencia en contratación estatal (Ley 80, Ley 1474, Ley 1150).
+Usa solo los datos del proyecto que se dan abajo; si algo no está en los datos, dilo. Valores en pesos colombianos.
+Usuario actual: ${u ? `${u.nombre} (${u.rol})` : 'sin identificar'}.
+
+DATOS DEL PROYECTO (JSON):
+${JSON.stringify(datos)}`;
+}
+
+async function asistente(proyectoId, mensajes, u) {
+  const c = confAsistente();
+  if (!asistenteListo(c)) throw new Rechazo(400, c.proveedor === 'ollama'
+    ? 'Falta elegir el modelo de Ollama: el director lo configura en Inicio → Configurar asistente'
+    : 'Falta la clave de la API de Claude: el director la configura en Inicio → Configurar asistente');
+  const sistema = await promptAsistente(proyectoId, u);
+  const msgs = mensajes.slice(-20).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') }));
+  return c.proveedor === 'ollama' ? asistenteOllama(c, sistema, msgs) : asistenteClaude(c, sistema, msgs);
+}
+
+async function asistenteClaude(c, sistema, msgs) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  const cliente = new Anthropic({ apiKey: c.clave });
   let resp;
   try { resp = await cliente.beta.messages.create({
     model: 'claude-opus-5-5',
@@ -274,14 +315,8 @@ async function asistente(proyectoId, mensajes, u) {
     output_config: { effort: 'medium' },
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
-    system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: `Eres el asistente de SIGI Pro, un sistema de gestión de interventoría de obras viales en Colombia.
-Respondes en español, con precisión y de forma breve, como un ingeniero de interventoría con experiencia en contratación estatal (Ley 80, Ley 1474, Ley 1150).
-Usa solo los datos del proyecto que se dan abajo; si algo no está en los datos, dilo. Valores en pesos colombianos.
-Usuario actual: ${u ? `${u.nombre} (${u.rol})` : 'sin identificar'}.
-
-DATOS DEL PROYECTO (JSON):
-${JSON.stringify(datos)}` }],
-    messages: mensajes.slice(-20).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
+    system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: sistema }],
+    messages: msgs,
   }); } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) throw new Rechazo(400, 'La clave de la API de Claude no es válida');
     if (e instanceof Anthropic.RateLimitError) throw new Rechazo(429, 'El asistente está ocupado: intente en un minuto');
@@ -289,6 +324,27 @@ ${JSON.stringify(datos)}` }],
   }
   if (resp.stop_reason === 'refusal') return { texto: 'El asistente no puede responder esa consulta.' };
   return { texto: resp.content.filter(b => b.type === 'text').map(b => b.text).join('\n') };
+}
+
+// Ollama corre en este equipo (o en la red local): no necesita clave y los datos no salen del computador
+async function asistenteOllama(c, sistema, msgs) {
+  let r;
+  try {
+    r = await fetch(`${c.ollama_url}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // Un modelo local tarda más; se da hasta 5 minutos (la primera vez lo carga en memoria)
+      signal: AbortSignal.timeout(300000),
+      body: JSON.stringify({ model: c.ollama_modelo, stream: false, options: { num_ctx: 16384 },
+        messages: [{ role: 'system', content: sistema }, ...msgs] }),
+    });
+  } catch (e) {
+    if (e.name === 'TimeoutError') throw new Rechazo(504, 'Ollama tardó demasiado en responder. Pruebe con un modelo más pequeño.');
+    throw new Rechazo(502, `No hay respuesta de Ollama en ${c.ollama_url}. Verifique que Ollama esté abierto (ollama serve).`);
+  }
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 404) throw new Rechazo(400, `El modelo «${c.ollama_modelo}» no está descargado. En una terminal: ollama pull ${c.ollama_modelo}`);
+  if (!r.ok) throw new Rechazo(502, 'Error de Ollama: ' + (d.error || r.status));
+  return { texto: d.message?.content || '' };
 }
 
 // ---------- HTTP ----------
@@ -328,12 +384,27 @@ async function api(req, res, url) {
     return enviar(res, 200, yo);
   }
   if (r0 === 'auditoria' && req.method === 'GET') return enviar(res, 200, await db.all('SELECT * FROM auditoria ORDER BY id DESC LIMIT ?', Number(q.limite) || 200));
-  if (r0 === 'asistente' && r1 === 'config' && req.method === 'GET') return enviar(res, 200, { configurado: !!claveAsistente() });
+  if (r0 === 'asistente' && r1 === 'config' && req.method === 'GET') {
+    const c = confAsistente(); // la clave nunca se devuelve
+    return enviar(res, 200, { configurado: asistenteListo(c), proveedor: c.proveedor, tieneClave: !!c.clave, ollama_url: c.ollama_url, ollama_modelo: c.ollama_modelo });
+  }
+  if (r0 === 'asistente' && r1 === 'modelos' && req.method === 'POST') {
+    exigir(u, 'asistente');
+    const url = String((await leerCuerpo(req)).ollama_url || confAsistente().ollama_url).trim().replace(/\/+$/, '');
+    return enviar(res, 200, { modelos: await modelosOllama(url) });
+  }
   if (r0 === 'asistente' && r1 === 'config' && req.method === 'POST') {
     exigir(u, 'asistente');
     const b = await leerCuerpo(req);
-    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify({ clave: String(b.clave || '').trim() }));
-    await auditar(u, 'asistente', null, 'configurar', null);
+    let previo = {};
+    try { if (fs.existsSync(ARCH_ASISTENTE)) previo = JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')); } catch {}
+    const nuevo = { ...previo, proveedor: b.proveedor === 'ollama' ? 'ollama' : 'claude' };
+    if (b.clave) nuevo.clave = String(b.clave).trim(); // vacío = conservar la clave anterior
+    if (b.ollama_url != null) nuevo.ollama_url = String(b.ollama_url).trim().replace(/\/+$/, '') || OLLAMA_URL;
+    if (b.ollama_modelo != null) nuevo.ollama_modelo = String(b.ollama_modelo).trim() || null;
+    fs.mkdirSync(DATOS, { recursive: true });
+    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify(nuevo));
+    await auditar(u, 'asistente', null, 'configurar', { proveedor: nuevo.proveedor, modelo: nuevo.proveedor === 'ollama' ? nuevo.ollama_modelo : 'claude-opus-5-5' });
     return enviar(res, 200, { ok: true });
   }
   if (r0 === 'asistente' && req.method === 'POST') { const b = await leerCuerpo(req); return enviar(res, 200, await asistente(Number(r1), b.mensajes || [], u)); }

@@ -12,6 +12,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
 - Balance del contrato y mayores y menores cantidades.
 - Gastos reales y control de costos del contrato propio: presupuestado, gastado, facturado y margen.
 - Vencimientos, pólizas, personal, correspondencia, bitácora, ensayos y memoria-grafo.
+- Asistente con dos proveedores, elegibles en Inicio → Configurar asistente: Claude (nube, con clave) u Ollama (modelo local, sin internet; los datos no salen del equipo).
 
 ## Siguiente, por prioridad
 
