@@ -15,7 +15,11 @@
     </label>
     <div class="titulo">Sistema Integral de Gestión de Interventoría</div>
     <div class="fecha" id="hoy"></div>
+    <button class="cab-btn" id="btn-buscar" title="Buscar en el proyecto (Ctrl+K)">🔍 Buscar <kbd>Ctrl+K</kbd></button>
+    <button class="cab-btn" id="btn-campana" title="Avisos de los próximos 7 días">🔔<span id="campana-n" class="globo" hidden></span></button>
+    <button class="cab-btn" id="btn-usuario" title="Cambiar de usuario">👤 <span id="usuario-nombre">Sin usuario</span></button>
     <button class="ayuda" id="btn-acerca" title="Acerca de SIGI Pro">?</button>
+    <div id="panel-avisos" class="panel-avisos" hidden></div>
   </header>
 
   <nav class="cinta">
@@ -38,6 +42,7 @@
       <div class="lateral-pestanas">
         <button data-panel="pendientes" class="activo">Pendientes</button>
         <button data-panel="memoria">Memoria</button>
+        <button data-panel="asistente">Asistente</button>
       </div>
       <div class="lateral-cuerpo" id="lateral-cuerpo"></div>
     </aside>

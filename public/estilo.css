@@ -26,6 +26,35 @@ button, input, select, textarea { font: inherit; }
 .marca span { color: #ffc83d; font-weight: 300; margin-left: -3px; }
 .ayuda { width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,.6); background: none; color: #fff; cursor: pointer; font-weight: 700; }
 .ayuda:hover { background: rgba(255,255,255,.15); }
+.cab-btn { position: relative; background: none; border: 1px solid rgba(255,255,255,.35); color: #fff; border-radius: 3px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
+.cab-btn:hover { background: rgba(255,255,255,.15); }
+.cab-btn kbd { font: 10px Consolas, monospace; opacity: .75; margin-left: 4px; }
+.globo { position: absolute; top: -6px; right: -6px; background: var(--rojo); color: #fff; border-radius: 9px; font-size: 10px; min-width: 16px; padding: 0 4px; line-height: 16px; }
+.panel-avisos { position: fixed; top: 42px; right: 12px; width: 360px; max-height: 60vh; overflow: auto; background: #fff; color: var(--texto); border: 1px solid var(--borde); border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.18); z-index: 20; }
+.panel-avisos .aviso-fila { padding: 7px 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+.panel-avisos .aviso-fila:hover, .resultado.sel, .resultado:hover { background: var(--azul-claro); }
+.panel-avisos .f { font-size: 11px; color: var(--tenue); }
+.panel-avisos .vencido .f { color: var(--rojo); font-weight: 600; }
+#buscar-global { width: 100%; padding: 6px 8px; font-size: 14px; }
+.resultados { max-height: 50vh; overflow: auto; margin-top: 8px; }
+.resultado { padding: 5px 8px; cursor: pointer; border-radius: 3px; }
+.resultado .g { font-size: 11px; color: var(--tenue); }
+.lista-usuarios { display: grid; gap: 6px; margin: 8px 0; }
+.lista-usuarios button { text-align: left; padding: 7px 10px; border: 1px solid var(--borde); background: #fff; border-radius: 4px; cursor: pointer; }
+.lista-usuarios button:hover, .lista-usuarios button.actual { background: var(--azul-claro); border-color: var(--azul); }
+/* Barra de pasos del acta */
+.pasos { display: flex; align-items: flex-start; margin: 0 0 12px; max-width: 1100px; }
+.paso { flex: 1; align-self: flex-start; display: block; height: 56px; position: relative; text-align: center; outline: none; box-shadow: none; font-size: 11px; color: var(--tenue); padding-top: 26px; cursor: pointer; background: none; border: 0; }
+.paso::before { content: attr(data-n); position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: #e0e0e0; color: #555; font-weight: 700; z-index: 1; }
+.paso::after { content: ''; position: absolute; top: 10px; left: -50%; width: 100%; height: 3px; background: #e0e0e0; }
+.paso:first-child::after { display: none; }
+.paso.listo::before { background: var(--verde); color: #fff; content: '✓'; }
+.paso.listo::after, .paso.actual::after { background: var(--verde); }
+.paso.actual { color: var(--texto); font-weight: 600; }
+.paso.actual::before { background: var(--azul); color: #fff; }
+.paso.obs.actual::before { background: var(--ambar); }
+.paso:disabled { cursor: default; }
+.candado { background: #fff4e0; border: 1px solid #f0c27a; color: #7a4a00; padding: 6px 10px; border-radius: 4px; margin-bottom: 10px; max-width: 1100px; }
 .acerca { display: flex; gap: 20px; align-items: center; }
 .acerca img { width: 84px; height: 84px; }
 .acerca h3 { font-size: 24px; margin: 0; }
@@ -146,3 +175,8 @@ dialog textarea { width: 100%; height: 240px; font-family: Consolas, monospace; 
 
 svg.curva { width: 100%; height: 220px; }
 svg.curva text { font-size: 10px; fill: #555; }
+.chat { display: flex; flex-direction: column; gap: 6px; max-height: calc(100% - 90px); overflow: auto; }
+.msg { padding: 6px 8px; border-radius: 6px; line-height: 1.4; }
+.msg.user { background: var(--azul-claro); align-self: flex-end; max-width: 90%; }
+.msg.assistant { background: #f5f5f5; border: 1px solid #e5e5e5; }
+.chat-txt { width: 100%; height: 64px; margin-top: 8px; resize: none; }

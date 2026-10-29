@@ -23,7 +23,7 @@ function num(s) {
 }
 
 async function api(ruta, metodo = 'GET', cuerpo) {
-  const r = await fetch('/api/' + ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+  const r = await fetch('/api/' + ruta, { method: metodo, headers: { 'Content-Type': 'application/json', 'X-Usuario': E.usuario?.id || '' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
   const d = await r.json();
   if (!r.ok || (d && d.error)) throw new Error(d.error || r.statusText);
   return d;
@@ -68,7 +68,7 @@ const ICONOS = {
 };
 
 // ---------- Estado ----------
-const E = { proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
+const E = { usuario: null, meta: null, proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
 const contrato = tipo => E.res?.contratos.find(c => c.tipo === tipo);
 
 // ---------- Cinta de opciones ----------
@@ -80,7 +80,8 @@ const CINTA = {
   inicio: ['Inicio', [
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
     ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
-    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')]]],
+    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente (Claude)', 'memoria', () => mostrarLateral('asistente')], ['Clave del asistente', 'nube', configurarAsistente]]],
+    ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
   obra: ['Ejecución de obra', [
@@ -150,7 +151,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos' }[t] || k;
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría' }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
 function cintaDe(k) {
@@ -184,11 +185,11 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria }[t];
     await vista(cont, x);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
-async function refrescar() { E.res = await api('resumen/' + E.pid); pintarLateral(); await pintarDocs(); estadoProyecto(); pintarSync(); }
+async function refrescar() { E.res = await api('resumen/' + E.pid); pintarCampana(); pintarLateral(); await pintarDocs(); estadoProyecto(); pintarSync(); }
 
 // ---------- Edición en celda ----------
 // Al hacer clic en una celda .edit se cambia por un campo; al salir se guarda con fn(valor)
@@ -211,7 +212,7 @@ function editable(cont, alGuardar) {
   });
 }
 async function refrescarSilencioso() { E.res = await api('resumen/' + E.pid); pintarArbol(); pintarLateral(); estadoProyecto(); }
-const celda = (v, campo, tipo = 'text', extra = '') => `<td class="edit ${tipo === 'num' ? 'num' : ''}" data-c="${campo}" data-tipo="${tipo}" data-v="${esc(v ?? '')}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
+window.celda = (v, campo, tipo = 'text', extra = '') => `<td class="edit ${tipo === 'num' ? 'num' : ''}" data-c="${campo}" data-tipo="${tipo}" data-v="${esc(v ?? '')}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
 
 // ---------- Vistas ----------
 async function vTablero(cont) {
@@ -335,13 +336,16 @@ async function exportarPresupuesto() {
 // Actas
 async function vActa(cont, id) {
   const d = await api('acta/' + id), a = d.acta, esObra = d.contrato.tipo === 'obra';
-  const estados = 'Borrador|Presentada|En revisión|Aprobada|Pagada|Rechazada';
+  const pasos = E.meta.estados_acta, i = pasos.indexOf(a.estado), bloq = i >= E.meta.bloqueo;
+  // Acta aprobada o posterior: celdas de solo lectura
+  const celda = bloq ? (v, c, tipo = 'text', extra = '') => `<td class="${tipo === 'num' ? 'num' : ''}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>` : window.celda;
   const t = d.totales;
   cont.innerHTML = `<h2>${esObra ? 'Acta parcial de obra' : 'Cuenta de cobro de interventoría'} N.º ${a.numero}</h2>
   <p class="sub">${esc(d.contrato.contratista || '')} · contrato ${esc(d.contrato.numero || '')}</p>
   <table class="grilla" id="g-acta-cab" style="max-width:900px;margin-bottom:10px"><tbody><tr>
-    <th>Periodo desde</th>${celda(a.desde, 'desde', 'date')}<th>Hasta</th>${celda(a.hasta, 'hasta', 'date')}<th>Fecha del acta</th>${celda(a.fecha, 'fecha', 'date')}
-    <th>Estado</th>${celda(a.estado, 'estado', 'select', `data-op="${estados}"`)}</tr></tbody></table>
+    <th>Periodo desde</th>${celda(a.desde, 'desde', 'date')}<th>Hasta</th>${celda(a.hasta, 'hasta', 'date')}<th>Fecha del acta</th>${celda(a.fecha, 'fecha', 'date')}</tr></tbody></table>
+  <div class="pasos" id="pasos-acta">${pasos.map((p, k) => `<button class="paso ${k < i ? 'listo' : ''} ${k === i ? 'actual' : ''} ${p === 'Con observaciones' ? 'obs' : ''}" data-n="${k + 1}" data-e="${esc(p)}" ${k === i ? 'disabled' : ''} title="${k === i ? 'Estado actual' : 'Pasar a: ' + esc(p)}">${esc(p)}</button>`).join('')}</div>
+  ${bloq ? `<div class="candado">🔒 Acta en estado <b>${esc(a.estado)}</b>: no se puede editar. Solo el director puede reabrirla devolviéndola a un estado anterior.</div>` : ''}
   <div class="tarjetas">
     <div class="tarjeta"><div class="et">Presentado por el contratista</div><div class="va">${pesos(t.presentado.total)}</div></div>
     <div class="tarjeta"><div class="et">Aprobado por la interventoría</div><div class="va">${pesos(t.acta.total)}</div><div class="no">${t.presentado.total ? 'Diferencia ' + pesos(t.acta.total - t.presentado.total) : ''}</div></div>
@@ -358,6 +362,10 @@ async function vActa(cont, id) {
   <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>`;
   editable($('#g-acta'), (td, v) => api(`acta/${id}/item/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   editable($('#g-acta-cab'), (td, v) => api('t/acta/' + id, 'PUT', { [td.dataset.c]: v }));
+  $('#pasos-acta').onclick = async e => {
+    const b = e.target.closest('.paso'); if (!b || b.disabled || !confirm(`¿Pasar el acta ${a.numero} a "${b.dataset.e}"?`)) return;
+    try { await api('t/acta/' + id, 'PUT', { estado: b.dataset.e }); aviso('Estado: ' + b.dataset.e); await refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+  };
 }
 async function nuevaActa(tipo) {
   const c = contrato(tipo); if (!c) return aviso('No hay contrato de ' + tipo);
@@ -366,6 +374,82 @@ async function nuevaActa(tipo) {
   const a = await api('t/acta', 'POST', { contrato_id: c.id, desde, fecha: hoyISO(), estado: 'Borrador' });
   await refrescar(); abrir('acta:' + a.id); aviso('Acta ' + a.numero + ' creada');
 }
+// ---------- Usuarios y auditoría ----------
+const ROL = { director: 'Director', residente: 'Residente', especialista: 'Especialista', administrativo: 'Administrativo', entidad: 'Entidad (solo consulta)' };
+async function vUsuarios(cont) {
+  const filas = await api('t/usuario');
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Usuarios</h2><span class="esp"></span><button class="btn prim" id="u-nuevo">+ Nuevo usuario</button></div>
+  <p class="sub">Solo el director crea o cambia usuarios. El correo (Gmail) sirve para entrar a la app escribiéndolo.</p>
+  <div class="grilla-cont"><table class="grilla" id="g-usuarios"><thead><tr><th>Nombre</th><th>Rol</th><th>Correo (Gmail)</th><th>Activo</th></tr></thead><tbody>
+  ${filas.map(f => `<tr data-id="${f.id}">${celda(f.nombre, 'nombre')}${celda(f.rol, 'rol', 'select', `data-op="${E.meta.roles.join('|')}"`)}${celda(f.correo, 'correo')}${celda(f.activo ? 'Sí' : 'No', 'activo', 'select', 'data-op="Sí|No"')}</tr>`).join('')}
+  </tbody></table></div>`;
+  editable($('#g-usuarios'), async (td, v) => { await api('t/usuario/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'activo' ? (v === 'Sí' ? 1 : 0) : v }); await cargarMeta(); });
+  $('#u-nuevo').onclick = async () => {
+    const nombre = prompt('Nombre del nuevo usuario:'); if (!nombre) return;
+    const correo = prompt('Correo de Gmail (opcional):') || null;
+    try { await api('t/usuario', 'POST', { nombre, correo, rol: 'residente' }); await cargarMeta(); pintarDocs(); aviso('Usuario creado: cambie el rol en la tabla'); } catch (e) { aviso('Error: ' + e.message); }
+  };
+}
+async function vAuditoria(cont) {
+  const filas = await api('auditoria?limite=300');
+  const txt = c => { try { const o = JSON.parse(c); return Object.entries(o || {}).map(([k, v]) => Array.isArray(v) ? `${k}: ${v[0] ?? '∅'} → ${v[1] ?? '∅'}` : `${k}: ${v ?? ''}`).join(' · '); } catch { return c || ''; } };
+  cont.innerHTML = `<h2>Auditoría</h2><p class="sub">Últimos 300 cambios: quién, cuándo, tabla, registro y cambio</p>
+  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Tabla</th><th>Id</th><th>Cambio</th></tr></thead><tbody>
+  ${filas.map(f => `<tr><td>${new Date(f.fecha).toLocaleString('es-CO')}</td><td>${esc(f.usuario || '—')}</td><td>${esc(f.accion)}</td><td>${esc(f.tabla)}</td><td>${esc(f.registro_id)}</td><td>${esc(txt(f.cambio))}</td></tr>`).join('') || '<tr><td colspan="6" class="sub">Sin cambios registrados</td></tr>'}
+  </tbody></table></div>`;
+}
+async function cargarMeta() {
+  E.meta = await api('usuarios');
+  if (E.usuario) E.usuario = E.meta.usuarios.find(u => u.id === E.usuario.id) || null;
+  pintarUsuario();
+}
+function pintarUsuario() { $('#usuario-nombre').textContent = E.usuario ? `${E.usuario.nombre} · ${ROL[E.usuario.rol] || E.usuario.rol}` : 'Sin usuario'; }
+function fijarUsuario(u) { E.usuario = u; guardarLocal('usuario', u.id); pintarUsuario(); $('#dialogo').close(); aviso('Sesión: ' + u.nombre); if (E.pid) refrescar(); }
+// Al abrir la app: elegir usuario de la lista o entrar con el correo de Gmail
+function elegirUsuario() {
+  const ultimo = Number(leerLocal('usuario'));
+  $('#dialogo-form').innerHTML = `<h3>¿Quién está usando SIGI Pro?</h3>
+    <div class="lista-usuarios">${E.meta.usuarios.map(u => `<button type="button" data-u="${u.id}" class="${u.id === ultimo ? 'actual' : ''}"><b>${esc(u.nombre)}</b> · ${esc(ROL[u.rol] || u.rol)}${u.correo ? ` <span class="sub">${esc(u.correo)}</span>` : ''}</button>`).join('')}</div>
+    <p class="sub">O entre con su correo de Gmail registrado:</p>
+    <div style="display:flex;gap:6px"><input id="u-correo" type="email" placeholder="nombre@gmail.com" style="flex:1"><button type="button" class="btn" id="u-entrar">Entrar</button></div>
+    <p class="sub" id="u-msg"></p>`;
+  $('#dialogo').showModal();
+  $('.lista-usuarios').onclick = e => { const b = e.target.closest('[data-u]'); if (b) fijarUsuario(E.meta.usuarios.find(u => u.id === Number(b.dataset.u))); };
+  const entrar = async () => { try { fijarUsuario(await api('entrar', 'POST', { correo: $('#u-correo').value })); } catch (e) { $('#u-msg').textContent = e.message; } };
+  $('#u-entrar').onclick = entrar;
+  $('#u-correo').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); entrar(); } };
+}
+$('#btn-usuario').onclick = elegirUsuario;
+
+// ---------- Búsqueda global (Ctrl+K) ----------
+function buscarGlobal() {
+  $('#dialogo-form').innerHTML = `<input id="buscar-global" placeholder="Buscar ítems, actas, correspondencia, pólizas, personal… (Esc para cerrar)" autocomplete="off"><div class="resultados" id="resultados"><p class="sub">Escriba al menos 2 letras</p></div>`;
+  $('#dialogo').showModal();
+  const inp = $('#buscar-global'); let res = [], sel = 0;
+  const pintar = () => ($('#resultados').innerHTML = res.map((r, k) => `<div class="resultado ${k === sel ? 'sel' : ''}" data-k="${k}"><div class="g">${esc(r.grupo)}</div>${esc(r.titulo)}</div>`).join('') || '<p class="sub">Sin resultados</p>');
+  const ir = k => { const r = res[k]; if (r) { $('#dialogo').close(); abrir(r.abrir); } };
+  inp.oninput = () => { clearTimeout(inp.t); inp.t = setTimeout(async () => { res = await api(`buscar/${E.pid}?q=${encodeURIComponent(inp.value)}`); sel = 0; pintar(); }, 200); };
+  inp.onkeydown = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, Math.min(res.length - 1, sel + (e.key === 'ArrowDown' ? 1 : -1))); pintar(); }
+    if (e.key === 'Enter') { e.preventDefault(); ir(sel); }
+  };
+  $('#resultados').onclick = e => { const d = e.target.closest('[data-k]'); if (d) ir(Number(d.dataset.k)); };
+  inp.focus();
+}
+$('#btn-buscar').onclick = buscarGlobal;
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (!$('#dialogo').open) buscarGlobal(); } });
+
+// ---------- Campana de avisos (próximos 7 días) ----------
+async function pintarCampana() {
+  try { E.avisos = await api('avisos/' + E.pid); } catch { return; }
+  const n = $('#campana-n'); n.hidden = !E.avisos.length; n.textContent = E.avisos.length;
+  $('#panel-avisos').innerHTML = E.avisos.map((v, k) => { const d = dias(v.fecha);
+    return `<div class="aviso-fila ${d < 0 ? 'vencido' : ''}" data-k="${k}"><div class="f">${fechaLarga(v.fecha)} · ${d < 0 ? 'vencido hace ' + -d + ' d' : d === 0 ? 'HOY' : 'faltan ' + d + ' d'} · ${esc(v.tipo)}</div>${esc(v.texto)}</div>`; }).join('') || '<p class="sub" style="padding:10px">Nada vence en los próximos 7 días.</p>';
+}
+$('#btn-campana').onclick = e => { e.stopPropagation(); $('#panel-avisos').hidden = !$('#panel-avisos').hidden; };
+$('#panel-avisos').onclick = e => { const d = e.target.closest('[data-k]'); if (d) { $('#panel-avisos').hidden = true; abrir(E.avisos[d.dataset.k].abrir); } };
+document.addEventListener('click', e => { if (!e.target.closest('#panel-avisos')) $('#panel-avisos').hidden = true; });
+
 async function aprobarTodo() {
   if (!confirm('¿Copiar las cantidades presentadas como aprobadas en todos los ítems de esta acta?')) return;
   await api(`acta/${E.activo.split(':')[1]}/aprobar-todo`, 'POST'); await refrescar(); aviso('Cantidades aprobadas');
@@ -473,6 +557,7 @@ async function pintarLateral() {
       return `<div class="pend ${d != null && d <= 3 ? 'urgente' : ''}"><div class="f">${v.fecha ? fechaLarga(v.fecha) + ' · ' + (d < 0 ? 'vencido hace ' + -d + ' d' : d === 0 ? 'HOY' : 'faltan ' + d + ' d') : 'Sin fecha'} · ${esc(v.tipo || '')}</div>${esc(v.descripcion)}</div>`; }).join('') || '<p class="sub">Sin pendientes.</p>';
     return;
   }
+  if (E.lateral === 'asistente') return pintarAsistente(c);
   c.innerHTML = `<input id="buscar-memoria" placeholder="Buscar en la memoria del proyecto…" value="${esc(E.buscar || '')}"><div id="res-memoria" class="sub">Escriba para buscar (garantía, personal, valor…)</div>`;
   const inp = $('#buscar-memoria');
   const buscar = async () => {
@@ -484,6 +569,30 @@ async function pintarLateral() {
   };
   inp.addEventListener('input', () => { clearTimeout(buscar.t); buscar.t = setTimeout(buscar, 250); });
   if (E.buscar) buscar();
+}
+
+// ---------- Asistente (Claude) ----------
+E.chat = [];
+function pintarAsistente(c) {
+  const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  c.innerHTML = `<div id="chat" class="chat">${E.chat.map(m => `<div class="msg ${m.role}">${md(m.content)}</div>`).join('') || '<p class="sub">Pregunte sobre el proyecto: saldos, actas, vencimientos, riesgos…</p>'}</div>
+    <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter"></textarea>`;
+  const txt = $('#chat-txt'), chat = $('#chat'); chat.scrollTop = chat.scrollHeight;
+  txt.onkeydown = async e => {
+    if (e.key !== 'Enter' || e.shiftKey || !txt.value.trim()) return;
+    e.preventDefault();
+    E.chat.push({ role: 'user', content: txt.value.trim() }); E.chat.push({ role: 'assistant', content: 'Pensando…' }); pintarAsistente(c);
+    try { const r = await api('asistente/' + E.pid, 'POST', { mensajes: E.chat.slice(0, -1) }); E.chat[E.chat.length - 1].content = r.texto; }
+    catch (er) { E.chat[E.chat.length - 1].content = '⚠️ ' + er.message; }
+    if (E.lateral === 'asistente') pintarAsistente(c);
+  };
+  txt.focus();
+}
+async function configurarAsistente() {
+  const s = await api('asistente/config');
+  const clave = prompt((s.configurado ? 'El asistente ya tiene clave. ' : '') + 'Pegue la clave de la API de Claude (console.anthropic.com). Se guarda solo en este equipo:');
+  if (!clave) return;
+  try { await api('asistente/config', 'POST', { clave }); aviso('Clave del asistente guardada'); } catch (e) { aviso('Error: ' + e.message); }
 }
 
 // ---------- Sincronización con la nube (Turso) ----------
@@ -570,4 +679,4 @@ $('#zoom').addEventListener('input', e => { document.body.style.zoom = e.target.
 const z = leerLocal('zoom'); if (z) { $('#zoom').value = z; document.body.style.zoom = z / 100; }
 $('#hoy').textContent = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-cargarProyectos().catch(e => ($('#contenido-doc').innerHTML = `<div class="vacio">No se pudo conectar con el servidor: ${esc(e.message)}</div>`));
+cargarMeta().then(() => { elegirUsuario(); return cargarProyectos(); }).catch(e => ($('#contenido-doc').innerHTML = `<div class="vacio">No se pudo conectar con el servidor: ${esc(e.message)}</div>`));
