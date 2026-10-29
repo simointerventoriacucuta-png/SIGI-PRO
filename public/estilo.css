@@ -298,3 +298,35 @@ tr.tachado td { color: #999; text-decoration: line-through; }
   .grilla th, .grilla.congelar td, .grilla tfoot td { position: static !important; }
   .grilla { font-size: 10px; }
 }
+/* Tablero de indicadores: semáforos, columnas y miniaturas */
+.luz { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: 1px; background: #bdbdbd; }
+.luz.verde { background: var(--verde); } .luz.amarillo { background: #f2b200; } .luz.rojo { background: var(--rojo); }
+.tarjeta.sem-verde { border-left: 4px solid var(--verde); } .tarjeta.sem-amarillo { border-left: 4px solid #f2b200; } .tarjeta.sem-rojo { border-left: 4px solid var(--rojo); }
+.tres-col { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; margin-bottom: 14px; }
+.va-grande { font-size: 20px; font-weight: 600; } .va-grande.malo { color: var(--rojo); }
+tr.clic { cursor: pointer; } tr.clic:hover { background: var(--azul-claro); }
+.miniaturas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 6px; }
+.miniaturas img { width: 100%; height: 64px; object-fit: cover; border-radius: 3px; border: 1px solid var(--borde); }
+svg.columnas { width: 100%; height: 200px; } svg.columnas text { font-size: 10px; fill: #555; }
+/* Calendario del proyecto */
+.cal-titulo { margin: 4px 0 6px; }
+a.btn { text-decoration: none; color: inherit; }
+.cal-leyenda { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; margin-bottom: 8px; }
+.cal-leyenda label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cal-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.cal-grilla { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-top: 1px solid var(--borde); border-left: 1px solid var(--borde); max-width: 1200px; }
+.cab-dia { background: var(--azul-claro); font-weight: 600; font-size: 11.5px; padding: 4px 6px; border-right: 1px solid var(--borde); border-bottom: 1px solid var(--borde); text-transform: capitalize; }
+.dia { min-height: 92px; padding: 3px 4px; border-right: 1px solid var(--borde); border-bottom: 1px solid var(--borde); background: #fff; cursor: copy; overflow: hidden; }
+.cal-grilla.semana .dia { min-height: 260px; }
+.dia.otro { background: #f7f7f7; color: var(--tenue); }
+.dia.hoy { background: #fff8e1; box-shadow: inset 0 0 0 2px var(--azul); }
+.num-dia { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
+.ev { font-size: 11px; line-height: 1.35; padding: 0 4px; margin-bottom: 2px; border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 12%, #fff); border-radius: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.ev.vencido { color: var(--rojo); font-weight: 600; background: #fdecea; }
+.mas { font-size: 10.5px; color: var(--azul); cursor: pointer; }
+.agenda-dia { max-width: 900px; border-bottom: 1px solid var(--borde); padding: 6px 0; }
+.agenda-dia.hoy b { color: var(--azul); }
+.fila-ag { display: grid; grid-template-columns: 12px 110px 1fr; gap: 6px; align-items: center; padding: 2px 4px; cursor: pointer; }
+.fila-ag:hover { background: var(--azul-claro); }
+.fila-ag .pt { width: 9px; height: 9px; border-radius: 50%; } .fila-ag .tipo { color: var(--tenue); font-size: 11.5px; }
+span.malo, b.malo { color: var(--rojo); }

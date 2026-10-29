@@ -32,7 +32,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
    - Amortización del anticipo por acta.
    - Retención de garantía, ReteFuente, ReteICA y estampillas.
    - Registro de pagos de la entidad con saldo por pagar.
-6. **Programa de obra y curva S** (M2 7.6 y 10.7):
+6. **Programa de obra y curva S** (M2 7.6 y 10.7) (avance: curva S mensual programado vs. ejecutado, valor ganado PV/EV/SPI/CPI con semáforo en el tablero y en Power BI; falta la línea base versionada):
    - Programado por periodo como línea base, con versiones por otrosí y suspensión.
    - Programado vs. ejecutado, SPI y semáforos.
 7. **Tramos y abscisas** (frentes de M2): avance por tramo, memorias de cálculo por abscisa (ancho × largo × espesor) y fotos.

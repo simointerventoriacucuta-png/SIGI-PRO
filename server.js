@@ -4,6 +4,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
 const { informeFormato, informeSSTFormato } = require('./informe.js');
@@ -903,6 +904,123 @@ async function extrasInforme(pid, contratos, ini, fin, tareas) {
   return { antes_despues };
 }
 
+// Tablero de indicadores del contrato de obra (valor ganado, curva S, plazo, pólizas, PQRS, SST, capturas y alertas).
+// Valor ganado (EVM, PMI): BAC = valor vigente; PV = % programado (Project) × BAC; EV = valor de las cantidades
+// aprobadas en actas (precios del contrato); EV físico = % real del programa × BAC; AC = lo facturado por actas.
+// SPI = EV / PV (atraso si < 1). CPI = EV físico / AC: < 1 indica que se ha facturado más de lo ejecutado físicamente.
+// Semáforo: ≥ 0,95 verde · 0,85–0,95 amarillo · < 0,85 rojo (umbral de la entidad; se puede ajustar por contrato).
+const semaforo = v => (v == null ? 'gris' : v >= 0.95 ? 'verde' : v >= 0.85 ? 'amarillo' : 'rojo');
+const finMes = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
+async function indicadores(pid) {
+  const r = await resumen(pid), hoy = r.hoy;
+  const ob = r.contratos.find(c => c.tipo === 'obra'), it = r.contratos.find(c => c.tipo !== 'obra');
+  const tareas = await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', pid);
+  const hojas = tareas.filter(t => !t.resumen && t.inicio && t.fin);
+  const peso = t => Math.max(1, (Date.parse(t.fin) - Date.parse(t.inicio)) / 86400000 || 1), tot = hojas.reduce((s, t) => s + peso(t), 0) || 1;
+  const progA = f => (hojas.length ? r2(hojas.reduce((s, t) => s + integ.programado(t, f) * peso(t), 0) / tot) : null);
+  const realPct = hojas.length ? r2(hojas.reduce((s, t) => s + (t.avance_real || 0) * peso(t), 0) / tot) : null;
+  const bac = ob?.valor_vigente || ob?.presupuesto || 0;
+  const actas = ob ? ob.actas.filter(a => a.estado !== 'Borrador') : [];
+  const fA = a => a.hasta || a.fecha || '';
+  const acumA = f => { const x = actas.filter(a => fA(a) && fA(a) <= f); return x.length ? x[x.length - 1].acumulado : 0; };
+  // Meses de la curva S: del inicio a la terminación vigente (o al programa), máximo 72
+  const fechas = [ob?.fecha_inicio, ob?.fecha_fin_vigente, ...hojas.flatMap(t => [t.inicio, t.fin]), ...actas.map(fA)].filter(Boolean).sort();
+  const curva = [];
+  if (fechas.length) {
+    let m = fechas[0].slice(0, 7); const ult = fechas[fechas.length - 1].slice(0, 7);
+    while (m <= ult && curva.length < 72) {
+      const fm = finMes(m), pasado = m <= hoy.slice(0, 7), corte = fm < hoy ? fm : hoy;
+      const prog = progA(fm), ej = pasado ? acumA(corte) : null;
+      const deMes = c => (c ? c.actas.filter(a => a.estado !== 'Borrador' && fA(a).slice(0, 7) === m).reduce((s, a) => s + (a.valor || 0), 0) : 0);
+      curva.push({ mes: m, programado_pct: prog, pv: prog == null ? null : r2(prog / 100 * bac), ejecutado_actas_pct: ej == null || !bac ? null : r2(ej / bac * 100), ev: ej,
+        real_programa_pct: m === hoy.slice(0, 7) ? realPct : null, valor_actas_mes: r2(deMes(ob)), valor_interventoria_mes: r2(deMes(it)) });
+      m = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 1)).toISOString().slice(0, 7);
+    }
+  }
+  const progHoy = progA(hoy), ev = actas.length ? actas[actas.length - 1].acumulado : 0;
+  const pv = progHoy == null ? null : r2(progHoy / 100 * bac), evFis = realPct == null ? null : r2(realPct / 100 * bac);
+  const spi = pv ? r2(ev / pv) : null, spiProg = progHoy ? r2(realPct / progHoy) : null, cpi = evFis != null && ev ? r2(evFis / ev) : null;
+  // Plazo transcurrido vs avance
+  const dTot = ob ? diasEntre(ob.fecha_inicio, ob.fecha_fin_vigente) : 0, dPas = ob?.fecha_inicio ? Math.min(dTot, diasEntre(ob.fecha_inicio, hoy)) : 0;
+  const plazo = { inicio: ob?.fecha_inicio || null, fin: ob?.fecha_fin_vigente || null, dias_total: dTot, dias_transcurridos: dPas, dias_restantes: Math.max(0, dTot - dPas),
+    pct_tiempo: dTot ? r2(dPas / dTot * 100) : null, pct_financiero: bac ? r2(ev / bac * 100) : null, pct_fisico: realPct, suspendido: !!ob?.suspendido };
+  // Avance por capítulo (última acta aprobada o el presupuesto)
+  const capitulos = [];
+  if (ob) {
+    const filas = actas.length ? (await detalleActa(actas[actas.length - 1].id)).filas : (await presupuesto(ob.id)).items;
+    let cap = { capitulo: 'Sin capítulo', contratado: 0, ejecutado: 0 };
+    for (const f of filas) {
+      if (f.tipo !== 1) { if (cap.contratado || cap.ejecutado) capitulos.push(cap); cap = { capitulo: [f.codigo, f.descripcion].filter(Boolean).join(' '), contratado: 0, ejecutado: 0 }; continue; }
+      cap.contratado += (f.cantidad_vigente ?? f.cantidad ?? 0) * (f.vr_unitario || 0); cap.ejecutado += f.vr_acumulado || 0;
+    }
+    if (cap.contratado || cap.ejecutado) capitulos.push(cap);
+    for (const c of capitulos) { c.contratado = r2(c.contratado); c.ejecutado = r2(c.ejecutado); c.pct = c.contratado ? r2(c.ejecutado / c.contratado * 100) : null; }
+  }
+  const en30 = new Date(Date.parse(hoy) + 30 * 86400000).toISOString().slice(0, 10), hace7 = new Date(Date.parse(hoy) - 7 * 86400000).toISOString().slice(0, 10);
+  const polizas = await db.all(`SELECT * FROM poliza WHERE proyecto_id = ? AND COALESCE(estado, '') NOT IN ('Cerrada') AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, pid, en30);
+  const pqrs = await db.all("SELECT * FROM social WHERE proyecto_id = ? AND tipo = 'PQRS' ORDER BY fecha", pid);
+  const abiertas = pqrs.filter(s => !['Cerrado', 'Respondido'].includes(s.estado));
+  const sstMeses = indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', pid));
+  const sst = sstMeses.find(m => m.mes === hoy.slice(0, 7)) || sstMeses[sstMeses.length - 1] || null;
+  const capturas = await db.all(`SELECT a.id, a.fecha, a.frente, a.abs_ini, a.abs_fin, a.cantidad, a.estado, i.codigo, i.descripcion item, i.unidad FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado' AND a.fecha >= ? ORDER BY a.fecha DESC, a.id DESC`, pid, hace7);
+  const fotos = await db.all(`SELECT id, nombre, fecha, descripcion FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha >= ? ORDER BY fecha DESC, id DESC LIMIT 6`, pid, hace7);
+  const porMes = await db.all(`SELECT substr(fecha, 1, 7) mes, COUNT(*) capturas, SUM(cantidad) cantidad FROM avance WHERE proyecto_id = ? AND estado <> 'Rechazado' AND fecha IS NOT NULL GROUP BY 1 ORDER BY 1`, pid);
+  return { hoy, evm: { bac, pv, ev, ev_fisico: evFis, ac: ev, programado_pct: progHoy, real_pct: realPct, spi, spi_programa: spiProg, cpi, sv: pv == null ? null : r2(ev - pv),
+      semaforo_spi: semaforo(spi ?? spiProg), semaforo_cpi: semaforo(cpi), tiene_programa: hojas.length > 0 },
+    plazo, curva, capitulos, polizas, pqrs: { total: pqrs.length, abiertas: abiertas.length, vencidas: abiertas.filter(s => s.plazo && s.plazo < hoy).length, lista: abiertas.slice(0, 5) },
+    sst, sst_meses: sstMeses, capturas, fotos, capturas_mes: porMes, alertas: await avisos(pid) };
+}
+
+// Calendario del proyecto: todas las fechas de la base en un rango [desde, hasta] (AAAA-MM-DD).
+// Cada evento: { fecha, tipo, titulo, abrir, vencido } — "abrir" es la misma clave que usa avisos() para abrir el documento.
+async function calendario(pid, desde, hasta) {
+  const hoy = hoyISO(), ev = [], en = f => f && f >= desde && f <= hasta;
+  const add = (fecha, tipo, titulo, abrir, pendiente = false) => { if (en(fecha)) ev.push({ fecha, tipo, titulo: String(titulo || '').trim() || tipo, abrir, vencido: !!(pendiente && fecha < hoy) }); };
+  const filas = (t, extra = '') => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ?${extra}`, pid);
+  for (const v of await filas('vencimiento')) add(v.fecha, 'Vencimiento', v.descripcion, 'tabla:vencimiento', v.estado !== 'Cumplido');
+  for (const p of await filas('poliza')) add(p.hasta, 'Póliza', `Vence ${p.amparo || 'póliza'} ${p.numero || ''} (${p.contrato || ''})`, 'tabla:poliza', !['Vencida', 'Cerrada'].includes(p.estado));
+  for (const s of await filas('social')) {
+    const abierta = !['Cerrado', 'Respondido'].includes(s.estado);
+    if (s.tipo === 'PQRS') { add(s.fecha, 'PQRS', 'PQRS recibida: ' + (s.descripcion || ''), 'tabla:social'); add(s.plazo, 'PQRS', 'Plazo de respuesta PQRS: ' + (s.descripcion || ''), 'tabla:social', abierta); }
+    else { add(s.fecha, 'Social', [s.tipo, s.comunidad, s.descripcion].filter(Boolean).join(' · '), 'tabla:social'); add(s.plazo, 'Social', 'Plazo: ' + (s.descripcion || s.tipo || ''), 'tabla:social', abierta); }
+  }
+  for (const c of await filas('correspondencia')) add(c.plazo, 'Correspondencia', `Responder ${c.radicado || ''} ${c.asunto || ''}`, 'tabla:correspondencia', c.requiere_respuesta === 'Sí' && !['Cerrada', 'Respondida'].includes(c.estado));
+  for (const m of await filas('pmt')) { add(m.desde, 'PMT', `Inicia vigencia PMT ${m.frente || ''}`, 'tabla:pmt'); add(m.hasta, 'PMT', `Vence PMT ${m.frente || ''}`, 'tabla:pmt', m.estado !== 'Cerrado'); }
+  for (const b of await filas('bitacora')) add(b.fecha, 'Bitácora', [b.frente, b.actividades].filter(Boolean).join(': ').slice(0, 120), 'tabla:bitacora');
+  for (const e of await filas('ensayo')) add(e.fecha, 'Ensayo', [e.ensayo, e.abscisa, e.resultado].filter(Boolean).join(' · '), 'tabla:ensayo');
+  for (const s of await filas('sst')) add(s.plazo, 'SST', [s.tipo, s.accion || s.descripcion].filter(Boolean).join(': '), 'tabla:sst', s.estado !== 'Cerrado');
+  for (const a of await filas('ambiental')) add(a.plazo, 'Ambiental', [a.componente || a.programa, a.accion || a.actividad].filter(Boolean).join(': '), 'tabla:ambiental', a.estado !== 'Cerrado');
+  for (const a of await db.all(`SELECT a.*, i.codigo FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado'`, pid))
+    add(a.fecha, 'Captura', `Avance ${a.codigo || ''} ${a.frente || ''} ${a.cantidad != null ? '· ' + a.cantidad : ''}`, 'avances');
+  for (const t of await db.all('SELECT * FROM tarea WHERE proyecto_id = ? AND resumen = 0', pid)) {
+    if (t.hito) add(t.inicio, 'Programa', '◆ ' + t.nombre, 'programa');
+    else { add(t.inicio, 'Programa', 'Inicia: ' + t.nombre, 'programa'); add(t.fin, 'Programa', 'Termina: ' + t.nombre + ` (${Math.round(t.avance_real || 0)} %)`, 'programa', (t.avance_real || 0) < 100); }
+  }
+  for (const c of (await resumen(pid)).contratos) {
+    const nom = c.tipo === 'obra' ? 'obra' : 'interventoría', A = c.tipo === 'obra' ? 'Acta' : 'Cuenta';
+    add(c.fecha_inicio, 'Contrato', `Acta de inicio · contrato de ${nom}`, 'contrato:' + c.tipo);
+    add(c.fecha_fin_vigente, 'Contrato', `Terminación vigente · contrato de ${nom}`, 'contrato:' + c.tipo);
+    for (const a of c.actas) { add(a.fecha, 'Acta', `${A} ${a.numero} (${a.estado})`, 'acta:' + a.id); if (a.hasta !== a.fecha) add(a.hasta, 'Acta', `Corte ${A.toLowerCase()} ${a.numero}`, 'acta:' + a.id); }
+    for (const o of c.otrosis) add(o.fecha, 'Otrosí', `Otrosí ${o.numero} · ${o.tipo || ''} (${nom})`, 'otrosis:' + c.id);
+    for (const x of c.suspensiones) { add(x.fecha_suspension, 'Suspensión', `Suspensión ${x.numero} (${nom})`, 'suspensiones:' + c.id); add(x.fecha_reinicio, 'Suspensión', `Reinicio ${x.numero} (${nom})`, 'suspensiones:' + c.id); }
+    const pl = c.plazos_liquidacion, liq = c.liquidacion, pend = !(liq && ['Firmada', 'Cerrada'].includes(liq.estado));
+    if (pl) { add(pl.bilateral, 'Liquidación', `Límite liquidación bilateral (${nom})`, 'liquidacion:' + c.id, pend); add(pl.unilateral, 'Liquidación', `Límite liquidación unilateral (${nom})`, 'liquidacion:' + c.id, pend); }
+  }
+  return ev.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.tipo.localeCompare(b.tipo));
+}
+// iCalendar (RFC 5545): eventos de día completo, CRLF, texto escapado y líneas plegadas a 75 octetos
+function ics(nombre, eventos) {
+  const tx = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  const plegar = l => { const b = Buffer.from(l, 'utf8'); if (b.length <= 75) return l; const out = []; let cur = '', n = 0;
+    for (const ch of l) { const k = Buffer.byteLength(ch); if (n + k > (out.length ? 74 : 75)) { out.push(cur); cur = ''; n = 0; } cur += ch; n += k; } out.push(cur); return out.join('\r\n '); };
+  const d = f => f.replace(/-/g, ''), sello = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const lineas = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SIGI Pro//Calendario de obra//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:' + tx(nombre)];
+  eventos.forEach((e, i) => lineas.push('BEGIN:VEVENT', `UID:${d(e.fecha)}-${i}-${crypto.createHash('sha1').update(e.tipo + e.titulo + e.fecha).digest('hex').slice(0, 12)}@sigi-pro`, 'DTSTAMP:' + sello,
+    'DTSTART;VALUE=DATE:' + d(e.fecha), 'DTEND;VALUE=DATE:' + d(sumarDias(e.fecha, 1)), 'SUMMARY:' + tx(`[${e.tipo}] ${e.titulo}`), 'CATEGORIES:' + tx(e.tipo), 'TRANSP:TRANSPARENT', 'END:VEVENT'));
+  lineas.push('END:VCALENDAR');
+  return lineas.map(plegar).join('\r\n') + '\r\n';
+}
+
 // Datos del informe mensual de interventoría (mes AAAA-MM)
 async function informeMensual(pid, mes) {
   mes = /^\d{4}-\d{2}$/.test(mes || '') ? mes : new Date().toISOString().slice(0, 7);
@@ -1097,6 +1215,16 @@ async function api(req, res, url) {
     const p = await db.get('SELECT nombre FROM proyecto WHERE id = ?', Number(r1));
     return archivo('Programa_SIGI.xml', 'application/xml', integ.xmlProject(p?.nombre, await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', Number(r1))));
   }
+  if (r0 === 'calendario') {
+    const pid = Number(r1), fecha = f => (/^\d{4}-\d{2}-\d{2}$/.test(f || '') ? f : null);
+    if (r2_ === 'ics') {
+      const p = await db.get('SELECT nombre FROM proyecto WHERE id = ?', pid);
+      res.setHeader('Content-Disposition', `attachment; filename="calendario-sigi-${pid}.ics"`);
+      return enviar(res, 200, ics('SIGI Pro · ' + (p?.nombre || 'Proyecto'), await calendario(pid, fecha(q.desde) || '1900-01-01', fecha(q.hasta) || '2999-12-31')), 'text/calendar; charset=utf-8');
+    }
+    return enviar(res, 200, await calendario(pid, fecha(q.desde) || hoyISO().slice(0, 8) + '01', fecha(q.hasta) || sumarDias(hoyISO(), 60)));
+  }
+  if (r0 === 'indicadores') return enviar(res, 200, await indicadores(Number(r1)));
   if (r0 === 'programa') return enviar(res, 200, await avanceFisico(Number(r1), q.fecha || new Date().toISOString().slice(0, 10)));
   // Autodesk (LandXML de Civil 3D / InfraWorks) y avance en el plano
   if (r0 === 'landxml' && req.method === 'POST') {
@@ -1123,6 +1251,12 @@ async function api(req, res, url) {
       gastos: () => db.all('SELECT g.fecha, g.descripcion, g.proveedor, g.valor, g.pagado FROM gasto g JOIN contrato c ON c.id = g.contrato_id WHERE c.proyecto_id = ?', pid),
       programa: async () => (await db.all('SELECT * FROM tarea WHERE proyecto_id = ?', pid)).map(t => ({ wbs: t.wbs, nombre: t.nombre, inicio: t.inicio, fin: t.fin, avance_real: t.avance_real, programado: integ.programado(t, r.hoy) })),
       tramos: () => db.all('SELECT nombre, abs_ini, abs_fin, actividad, avance, fecha FROM tramo WHERE proyecto_id = ?', pid),
+      curva_s: async () => (await indicadores(pid)).curva,
+      valor_ganado: async () => { const x = await indicadores(pid); return [{ fecha: x.hoy, ...x.evm, ...Object.fromEntries(Object.entries(x.plazo).map(([k, v]) => ['plazo_' + k, v])) }]; },
+      capitulos: async () => (await indicadores(pid)).capitulos,
+      capturas_mes: async () => (await indicadores(pid)).capturas_mes,
+      polizas: () => db.all('SELECT contrato, aseguradora, numero, amparo, valor, desde, hasta, estado FROM poliza WHERE proyecto_id = ?', pid),
+      alertas: () => avisos(pid),
       sst: () => db.all('SELECT * FROM sst WHERE proyecto_id = ?', pid), sst_indicadores: async () => indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', pid)), pmt: () => db.all('SELECT * FROM pmt WHERE proyecto_id = ?', pid), ambiental: () => db.all('SELECT * FROM ambiental WHERE proyecto_id = ?', pid), social: () => db.all('SELECT * FROM social WHERE proyecto_id = ?', pid),
     };
     if (!conjuntos[conjunto]) return enviar(res, 200, { conjuntos: Object.keys(conjuntos).map(k => `/api/bi/${pid}/${k}.csv`) });
