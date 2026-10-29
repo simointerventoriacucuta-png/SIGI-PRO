@@ -414,3 +414,128 @@ CREATE TABLE IF NOT EXISTS avance (
   usuario TEXT,
   lat REAL, lon REAL
 );
+
+-- Gestión social ampliada: Plan de Gestión Social (INVÍAS) / PGSC (ANI, Apéndice Técnico 8)
+-- PQRS con radicado. Plazos de la Ley 1755 de 2015 (art. 14) en días hábiles, sin festivos de Colombia (Ley 51 de 1983)
+CREATE TABLE IF NOT EXISTS pqrs (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  radicado TEXT,
+  fecha TEXT,                     -- recibida
+  tipo TEXT DEFAULT 'Petición',   -- Petición, Queja, Reclamo, Sugerencia, Denuncia, Solicitud de documentos, Consulta, Felicitación
+  canal TEXT,                     -- Oficina de atención, Buzón, Correo, Teléfono, Punto móvil, Reunión
+  peticionario TEXT,
+  frente TEXT,
+  descripcion TEXT,
+  plazo TEXT,                     -- 15 días (10 documentos, 30 consultas)
+  fecha_respuesta TEXT,
+  respuesta TEXT,
+  estado TEXT DEFAULT 'Abierta'   -- Abierta, En trámite, Respondida, Cerrada
+);
+-- Reuniones con la comunidad (inicio, avance, finalización) con lista de asistencia y acta
+CREATE TABLE IF NOT EXISTS reunion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Inicio, Avance, Finalización, Extraordinaria, Comité de participación
+  lugar TEXT,
+  comunidad TEXT,
+  convocados INTEGER,
+  asistentes INTEGER,
+  temas TEXT,
+  compromisos TEXT,
+  acta TEXT,                      -- número del acta
+  lista_asistencia TEXT DEFAULT 'No',
+  estado TEXT DEFAULT 'Programada' -- Programada, Realizada, Acta firmada
+);
+-- Actas de vecindad por predio: inicio y cierre (paz y salvo)
+CREATE TABLE IF NOT EXISTS acta_vecindad (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  predio TEXT,                    -- código o ficha predial
+  direccion TEXT,
+  abscisa TEXT,
+  tipo_inmueble TEXT,             -- Vivienda, Comercio, Institucional, Lote
+  propietario TEXT,
+  fecha_inicio TEXT,
+  estado_inicio TEXT,             -- descripción de fisuras, humedades, acabados
+  fecha_cierre TEXT,
+  estado_cierre TEXT,
+  danos TEXT DEFAULT 'No',
+  paz_y_salvo TEXT DEFAULT 'No',
+  estado TEXT DEFAULT 'Inicio levantado' -- Inicio levantado, Cierre pendiente, Cerrada, Con reclamación
+);
+-- Vinculación de mano de obra local por mes frente a la meta del contrato
+CREATE TABLE IF NOT EXISTS mano_obra (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  mes TEXT,                       -- AAAA-MM
+  total INTEGER DEFAULT 0,
+  local_no_calificada INTEGER DEFAULT 0,
+  local_calificada INTEGER DEFAULT 0,
+  mujeres INTEGER DEFAULT 0,
+  meta REAL,                      -- % de mano de obra local exigido en el contrato
+  notas TEXT
+);
+-- Cultura vial y capacitaciones a la comunidad
+CREATE TABLE IF NOT EXISTS capacitacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Cultura vial, Capacitación, Taller, Divulgación
+  tema TEXT,
+  publico TEXT,                   -- Escolares, Conductores, Peatones, Comunidad, Trabajadores
+  lugar TEXT,
+  asistentes INTEGER,
+  notas TEXT
+);
+-- Afectaciones a predios y a redes de servicios públicos
+CREATE TABLE IF NOT EXISTS afectacion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Predio, Acueducto, Alcantarillado, Energía, Gas, Telecomunicaciones, Acceso vehicular, Acceso peatonal
+  abscisa TEXT,
+  descripcion TEXT,
+  afectados INTEGER,
+  empresa TEXT,                   -- empresa de servicios o responsable
+  accion TEXT,
+  fecha_solucion TEXT,
+  estado TEXT DEFAULT 'Abierta'
+);
+-- Encuestas de satisfacción de la comunidad
+CREATE TABLE IF NOT EXISTS encuesta (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  ficha TEXT,                     -- código de la ficha social (ficha_social.codigo)
+  fecha TEXT,
+  tipo TEXT,                      -- Atención de PQRS, Reunión, Final de obra
+  encuestados INTEGER DEFAULT 0,
+  satisfechos INTEGER DEFAULT 0,
+  observaciones TEXT
+);
+-- Veedurías ciudadanas (Ley 850 de 2003)
+CREATE TABLE IF NOT EXISTS veeduria (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  registro TEXT,                  -- inscripción ante personería o cámara de comercio
+  fecha TEXT,                     -- conformación
+  integrantes INTEGER,
+  ultima_reunion TEXT,
+  solicitudes TEXT,
+  estado TEXT DEFAULT 'Activa'
+);
+-- Catálogo de fichas sociales del PAGA (Guía de Manejo Ambiental del INVÍAS 2022, programas 6 a 10). Se llena solo al arrancar.
+CREATE TABLE IF NOT EXISTS ficha_social (
+  id INTEGER PRIMARY KEY,
+  codigo TEXT UNIQUE,
+  programa TEXT,
+  nombre TEXT
+);

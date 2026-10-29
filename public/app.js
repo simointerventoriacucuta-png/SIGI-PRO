@@ -108,7 +108,7 @@ const CINTA = {
   control: ['Control de obra', [
     ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')]]],
     ['Ambiental', [['Fichas PAGA / PMA', 'ensayo', () => abrir('tabla:ambiental')], ['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')]]],
-    ['Social', [['Gestión social (PGS) y PQRS', 'correo', () => abrir('tabla:social')]]],
+    ['Social', [['PQRS', 'correo', () => abrir('tabla:pqrs')], ['Reuniones', 'personal', () => abrir('tabla:reunion')], ['Actas de vecindad', 'acta', () => abrir('tabla:acta_vecindad')], ['Mano de obra local', 'balance', () => abrir('tabla:mano_obra')], ['Otros (PGS)', 'correo', () => abrir('tabla:social')], ['Informe social', 'informe', informeSocial]]],
   ]],
   informes: ['Informes', [
     ['Obra', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores cantidades', 'mayores', ab('obra', 'mayores')]]],
@@ -169,7 +169,9 @@ function pintarArbol() {
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('avances', '📍 Capturas de avance', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
     h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:ambiental', 'Fichas PAGA / PMA', 1) + n('tabla:pmt', 'PMT (tránsito)', 1)
-      + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
+      + n('', '🤝 Social', 0, '', true) + n('tabla:pqrs', 'PQRS', 1) + n('tabla:reunion', 'Reuniones', 1) + n('tabla:acta_vecindad', 'Actas de vecindad', 1)
+      + n('tabla:mano_obra', 'Mano de obra local', 1) + n('tabla:capacitacion', 'Cultura vial y capacitaciones', 1) + n('tabla:afectacion', 'Afectaciones a predios y servicios', 1)
+      + n('tabla:encuesta', 'Encuestas de satisfacción', 1) + n('tabla:veeduria', 'Veedurías ciudadanas', 1) + n('tabla:social', 'Otras actividades (PGS)', 1)
       + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1);
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
@@ -199,7 +201,7 @@ function tituloDoc(k) {
 function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
-  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control' }[x];
+  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control', pqrs: 'control', reunion: 'control', acta_vecindad: 'control', mano_obra: 'control', capacitacion: 'control', afectacion: 'control', encuesta: 'control', veeduria: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
@@ -759,7 +761,7 @@ async function subirArchivos(lista, tabla, registroId) {
 async function dialogoAdjuntos(tabla, id) {
   const pintar = async () => {
     const lista = await api(`adjuntos/${E.pid}?tabla=${tabla}&registro_id=${id}`);
-    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', 'ambiental', 'social', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
+    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', 'ambiental', 'social', 'pqrs', 'reunion', 'acta_vecindad', 'capacitacion', 'afectacion', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
       <div class="adjuntos">${lista.map(miniatura).join('') || '<p class="sub">Aún no hay archivos. También puede arrastrarlos a esta ventana.</p>'}</div>
       <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
     const caja = $('#dialogo-form');
@@ -965,6 +967,11 @@ function informeMensual() {
   if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
   location.href = `/api/docx/informe/${E.pid}?mes=${mes.trim()}`;
 }
+function informeSocial() {
+  const mes = prompt('Mes del informe social (AAAA-MM):', new Date().toISOString().slice(0, 7)); if (!mes) return;
+  if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
+  location.href = `/api/docx/informe-social/${E.pid}?mes=${mes.trim()}`;
+}
 function exportarActa() { location.href = `/api/xlsx/acta/${E.activo.split(':')[1]}`; }
 
 // Balance y mayores/menores
@@ -1033,7 +1040,8 @@ async function vCostos(cont, cid) {
 // Tablas sencillas (control y registros)
 const ESTADOS = { vencimiento: 'Pendiente|En trámite|Cumplido|Vencido', personal: 'Propuesto|Aprobado|Vinculado|Por vincular|Retirado',
   poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada',
-  sst: 'Abierto|En seguimiento|Cerrado', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+  sst: 'Abierto|En seguimiento|Cerrado', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pqrs: 'Abierta|En trámite|Respondida|Cerrada', reunion: 'Programada|Realizada|Acta firmada',
+  acta_vecindad: 'Inicio levantado|Cierre pendiente|Cerrada|Con reclamación', afectacion: 'Abierta|En atención|Atendida|Cerrada', veeduria: 'Activa|Inactiva', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
 const PROGRAMAS_AMB = 'Desarrollo y aplicación de la gestión ambiental (DAGA)|Actividades constructivas|Gestión hídrica|Biótico (flora y fauna)|Instalaciones temporales, maquinaria y equipos|Gestión social|Seguridad y salud en el trabajo';
 const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
@@ -1045,12 +1053,36 @@ const TABLAS = {
   sst_mes: { titulo: 'SST · datos mensuales (Res. 0312 de 2019)', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajadores', 'Trabajadores', 'num'], ['accidentes', 'Accidentes', 'num'], ['accidentes_mortales', 'Mortales', 'num'], ['dias_incapacidad', 'Días incapacidad', 'num'], ['dias_cargados', 'Días cargados', 'num'], ['dias_ausencia', 'Días ausencia', 'num'], ['dias_programados', 'Días programados', 'num'], ['planillas_ok', 'PILA/ARL verificada', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
   ambiental: { titulo: 'Seguimiento ambiental (PAGA / PMA)', cols: [['fecha', 'Fecha', 'date'], ['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['ficha', 'Ficha'], ['actividad', 'Actividad'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['logro', 'Logro', 'num'], ['cantidad', 'Cantidad', 'num'], ['unidad', 'Und'], ['permiso', 'Permiso'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   pmt: { titulo: 'Planes de manejo de tránsito (PMT)', cols: [['frente', 'Frente'], ['abs_ini', 'Abscisa inicial'], ['abs_fin', 'Abscisa final'], ['cierre', 'Cierre', 'select:Total|Parcial|Por carril|Nocturno'], ['interferencia', 'Interferencia', 'select:Baja|Media|Alta'], ['radicado', 'Radicado aprobación'], ['aprobado', 'Aprobado', 'date'], ['desde', 'Vigente desde', 'date'], ['hasta', 'Vigente hasta', 'date'], ['dispositivos', 'Dispositivos'], ['ultima_inspeccion', 'Última inspección', 'date'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
-  social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha PAGA', 'select:ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  pqrs: { titulo: 'PQRS · atención al ciudadano (Ley 1755 de 2015)', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['radicado', 'Radicado'], ['fecha', 'Recibida', 'date'], ['tipo', 'Tipo', 'select:Petición|Queja|Reclamo|Sugerencia|Denuncia|Solicitud de documentos|Consulta|Felicitación'], ['canal', 'Canal', 'select:Oficina de atención|Buzón|Correo|Teléfono|Punto móvil|Reunión'], ['peticionario', 'Peticionario'], ['frente', 'Frente'], ['descripcion', 'Asunto'], ['plazo', 'Plazo', 'date'], ['fecha_respuesta', 'Respondida', 'date'], ['respuesta', 'Respuesta'], ['estado', 'Estado', 'select']] },
+  reunion: { titulo: 'Reuniones con la comunidad', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inicio|Avance|Finalización|Extraordinaria|Comité de participación'], ['lugar', 'Lugar'], ['comunidad', 'Comunidad'], ['convocados', 'Convocados', 'num'], ['asistentes', 'Asistentes', 'num'], ['temas', 'Temas'], ['compromisos', 'Compromisos'], ['acta', 'N.º acta'], ['lista_asistencia', 'Lista asistencia', 'select:No|Sí'], ['estado', 'Estado', 'select']] },
+  acta_vecindad: { titulo: 'Actas de vecindad por predio (inicio y cierre)', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['predio', 'Predio'], ['direccion', 'Dirección'], ['abscisa', 'Abscisa'], ['tipo_inmueble', 'Tipo', 'select:Vivienda|Comercio|Institucional|Lote|Otro'], ['propietario', 'Propietario / ocupante'], ['fecha_inicio', 'Acta inicio', 'date'], ['estado_inicio', 'Estado al inicio'], ['fecha_cierre', 'Acta cierre', 'date'], ['estado_cierre', 'Estado al cierre'], ['danos', 'Daños', 'select:No|Sí'], ['paz_y_salvo', 'Paz y salvo', 'select:No|Sí'], ['estado', 'Estado', 'select']] },
+  mano_obra: { titulo: 'Vinculación de mano de obra local', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['mes', 'Mes (AAAA-MM)'], ['total', 'Trabajadores', 'num'], ['local_no_calificada', 'Local no calificada', 'num'], ['local_calificada', 'Local calificada', 'num'], ['mujeres', 'Mujeres', 'num'], ['meta', 'Meta % contrato', 'num'], ['notas', 'Notas']] },
+  capacitacion: { titulo: 'Cultura vial y capacitaciones a la comunidad', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Cultura vial|Capacitación|Taller|Divulgación'], ['tema', 'Tema'], ['publico', 'Público', 'select:Escolares|Conductores|Motociclistas|Peatones|Comunidad|Trabajadores'], ['lugar', 'Lugar'], ['asistentes', 'Asistentes', 'num'], ['notas', 'Notas']] },
+  afectacion: { titulo: 'Afectaciones a predios y servicios públicos', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Predio|Acueducto|Alcantarillado|Energía|Gas|Telecomunicaciones|Acceso vehicular|Acceso peatonal'], ['abscisa', 'Abscisa'], ['descripcion', 'Descripción'], ['afectados', 'Afectados', 'num'], ['empresa', 'Empresa / responsable'], ['accion', 'Acción'], ['fecha_solucion', 'Solucionada', 'date'], ['estado', 'Estado', 'select']] },
+  encuesta: { titulo: 'Encuestas de satisfacción', cols: [['ficha', 'Ficha PAGA', 'select:ficha'], ['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Atención de PQRS|Reunión|Final de obra|Otra'], ['encuestados', 'Encuestados', 'num'], ['satisfechos', 'Satisfechos', 'num'], ['observaciones', 'Observaciones']] },
+  veeduria: { titulo: 'Veedurías ciudadanas (Ley 850 de 2003)', cols: [['nombre', 'Nombre'], ['registro', 'Registro (personería / cámara)'], ['fecha', 'Conformada', 'date'], ['integrantes', 'Integrantes', 'num'], ['ultima_reunion', 'Última reunión', 'date'], ['solicitudes', 'Solicitudes'], ['estado', 'Estado', 'select']] },
   ensayo: { titulo: 'Ensayos de laboratorio', cols: [['fecha', 'Fecha', 'date'], ['ensayo', 'Ensayo'], ['norma', 'Norma'], ['item', 'Ítem'], ['abscisa', 'Abscisa'], ['resultado', 'Resultado'], ['especificacion', 'Especificación'], ['cumple', 'Cumple', 'select:Sí|No|Pendiente'], ['laboratorio', 'Laboratorio']] },
+};
+// Semáforo de las PQRS y porcentajes de la gestión social
+function semaforoPQRS(f) {
+  if (f.fecha_respuesta || ['Respondida', 'Cerrada'].includes(f.estado)) return f.fecha_respuesta && f.plazo && f.fecha_respuesta > f.plazo ? ['Fuera de plazo', '#c62828'] : ['A tiempo', 'var(--verde)'];
+  const d = dias(f.plazo);
+  return d == null ? ['Sin plazo', '#777'] : d < 0 ? ['Vencida', '#c62828'] : d <= 3 ? ['Por vencer', '#e08a00'] : ['En término', 'var(--verde)'];
+}
+const porc = (a, b) => (b ? fmt(a / b * 100) + ' %' : '—');
+const TOTALES = {
+  pqrs: fs => `<h3 style="font-size:13px;margin:14px 0 4px">Semáforo de respuesta</h3><div class="grilla-cont"><table class="grilla"><thead><tr><th>Radicado</th><th>Tipo</th><th>Plazo</th><th>Semáforo</th></tr></thead><tbody>${fs.map(f => { const [t, c] = semaforoPQRS(f); return `<tr><td>${esc(f.radicado || '')}</td><td>${esc(f.tipo || '')}</td><td>${esc(f.plazo || '')}</td><td style="color:${c};font-weight:600">● ${t}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="sub">Plazo en días hábiles sin festivos de Colombia (Ley 1755 de 2015, art. 14): 15 días peticiones, quejas y reclamos; 10 días solicitudes de documentos; 30 días consultas. Se calcula al escoger el tipo o la fecha.</p>`,
+  mano_obra: fs => `<h3 style="font-size:13px;margin:14px 0 4px">% de mano de obra local por mes</h3><div class="grilla-cont"><table class="grilla"><thead><tr><th>Mes</th><th class="num">% local</th><th class="num">Meta %</th><th>Cumple</th></tr></thead><tbody>${fs.map(f => { const l = (f.local_no_calificada || 0) + (f.local_calificada || 0), v = f.total ? l / f.total * 100 : null; return `<tr><td>${esc(f.mes)}</td><td class="num">${porc(l, f.total)}</td><td class="num">${fmt(f.meta)}</td><td>${f.meta == null || v == null ? '—' : v >= f.meta ? 'Sí' : '<b style="color:#c62828">No</b>'}</td></tr>`; }).join('')}</tbody></table></div>`,
+  encuesta: fs => { const e = fs.reduce((s, f) => s + (f.encuestados || 0), 0), k = fs.reduce((s, f) => s + (f.satisfechos || 0), 0); return `<p class="sub">Satisfacción acumulada: ${porc(k, e)} (${k} de ${e} encuestados).</p>`; },
+  acta_vecindad: fs => `<p class="sub">${fs.length} predio(s) · con acta de cierre: ${fs.filter(f => f.fecha_cierre).length} · con daños: ${fs.filter(f => f.danos === 'Sí').length}. Adjunte el acta firmada y el registro fotográfico con el 📎 de cada predio.</p>`,
+  reunion: () => '<p class="sub">Adjunte el acta y la lista de asistencia con el 📎 de cada reunión: van al anexo 4 del informe mensual.</p>',
 };
 async function vTabla(cont, tabla) {
   const def = TABLAS[tabla], filas = await api(`t/${tabla}?proyecto_id=${E.pid}`);
-  const op = t => (t.startsWith('select:') ? t.slice(7) : ESTADOS[tabla] || '');
+  if (!E.fichasSoc) E.fichasSoc = (await api('t/ficha_social')).map(f => f.codigo).join('|');
+  const op = t => (t === 'select:ficha' ? E.fichasSoc : t.startsWith('select:') ? t.slice(7) : ESTADOS[tabla] || '');
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${def.titulo}</h2><span class="esp"></span><button class="btn prim" id="t-nuevo">+ Nueva fila</button></div>
   <div class="grilla-cont"><table class="grilla" id="g-tabla"><thead><tr>${def.cols.map(c => `<th class="${c[2] === 'num' ? 'num' : ''}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody>
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
@@ -1066,11 +1098,12 @@ async function vTabla(cont, tabla) {
     ${ind.map(m => `<tr><td>${esc(m.mes)}</td><td class="num">${fmt(m.frecuencia)}</td><td class="num">${fmt(m.severidad)}</td><td class="num">${fmt(m.mortalidad)}</td><td class="num">${fmt(m.ausentismo)}</td><td>${esc(m.planillas_ok)}</td></tr>`).join('') || '<tr><td colspan="6" class="sub">Agregue los datos del mes arriba</td></tr>'}
     </tbody></table></div><p class="sub">Frecuencia = AT del mes ÷ trabajadores × 100 · Severidad = (días de incapacidad + días cargados) ÷ trabajadores × 100 · Ausentismo = días de ausencia ÷ días programados × 100. Verifique las fórmulas con el texto oficial del Ministerio del Trabajo.</p>`);
   }
-  if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
+  if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin sábados, domingos ni festivos. Las PQRS con radicado van en Social › PQRS.</p>');
+  if (TOTALES[tabla]) cont.insertAdjacentHTML('beforeend', TOTALES[tabla](filas));
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
-  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social'].includes(tabla) ? { fecha: hoyISO() } : tabla === 'sst_mes' ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'pqrs', 'reunion', 'capacitacion', 'afectacion', 'encuesta'].includes(tabla) ? { fecha: hoyISO() } : tabla === 'acta_vecindad' ? { fecha_inicio: hoyISO() } : ['sst_mes', 'mano_obra'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
 // ---------- Panel lateral ----------
