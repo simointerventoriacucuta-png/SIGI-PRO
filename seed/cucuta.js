@@ -160,4 +160,23 @@ module.exports = async function sembrar(db) {
 
   for (const [amparo, vig] of [['Cumplimiento', 'Plazo + 6 meses'], ['Salarios, prestaciones e indemnizaciones', 'Plazo + 3 años'], ['Calidad del servicio', '5 años desde el acta de recibo final']])
     await ins('poliza', { proyecto_id: p, contrato: 'Interventoría 058', amparo, porcentaje: 10, valor: 69999540.38, estado: 'Pendiente', notas: `Vigencia: ${vig}. A favor de E-Desarrollo y del Municipio de Cúcuta (NIT 890.501.434-2)` });
+  // Ejemplo de SST con datos ficticios (sin nombres reales): matriz GTC 45, trabajadores y formatos del mes
+  const mes = new Date().toISOString().slice(0, 7), dia = n => `${mes}-${String(n).padStart(2, '0')}`;
+  for (const [actividad, peligro, clasificacion, nd, ne, nc, intervencion] of [
+    ['Excavación de cunetas', 'Derrumbe de paredes de la excavación', 'Condiciones de seguridad', 6, 3, 100, 'Talud o entibado, inspección diaria y permiso de excavación'],
+    ['Trabajo en la vía', 'Atropellamiento por vehículos', 'Condiciones de seguridad', 6, 4, 60, 'PMT implementado, paleteros y chaleco reflectivo'],
+    ['Corte de concreto', 'Material particulado', 'Químico', 2, 3, 25, 'Corte húmedo y respirador']])
+    await ins('sst_peligro', { proyecto_id: p, proceso: 'Construcción', actividad, peligro, clasificacion, nd, ne, nc, np: nd * ne, nr: nd * ne * nc, nivel: nd * ne * nc >= 600 ? 'I' : nd * ne * nc >= 150 ? 'II' : 'III', intervencion, estado: 'Abierto' });
+  for (const [i, cargo, grupo] of [[1, 'Residente SST', 'Administrativo'], [2, 'Oficial de obra', 'Operativo'], [3, 'Ayudante de obra', 'Operativo']])
+    await ins('sst_trabajador', { proyecto_id: p, nombre: 'Trabajador de ejemplo ' + i, cargo, grupo, eps: 'EPS', afp: 'AFP', arl: 'ARL', ccf: 'Caja', riesgo: 'V', ingreso: dia(1), examen_ingreso: dia(1), induccion: dia(1), notificacion_riesgos: dia(1), estado: 'Activo' });
+  await ins('sst_inspeccion', { proyecto_id: p, fecha: dia(5), tipo: 'EPP', frente: 'Frente 1', chequeo: '{"Casco con barbuquejo en buen estado":"C","Botas de seguridad":"C","Chaleco reflectivo en la vía":"NC"}', cumplimiento: 66.67, hallazgos: 'Un trabajador sin chaleco reflectivo', accion: 'Entregar chaleco', estado: 'Cerrado' });
+  await ins('sst_permiso', { proyecto_id: p, fecha: dia(6), numero: 'PT-001', tipo: 'Excavación', frente: 'Frente 1', actividad: 'Excavación de cunetas', altura: 1.6, ats: 'Sí', lista_chequeo: 'Sí', rescate: 'No aplica', vigente_hasta: dia(6), estado: 'Cerrado' });
+  await ins('sst_capacitacion', { proyecto_id: p, fecha: dia(2), tipo: 'Charla de 5 minutos', tema: 'Uso correcto del EPP', facilitador: 'Residente SST', horas: 0.25, asistentes: 3, estado: 'Realizada' });
+  await ins('sst_epp', { proyecto_id: p, fecha: dia(1), trabajador: 'Trabajador de ejemplo 2', elemento: 'Casco con barbuquejo', cantidad: 1, motivo: 'Dotación inicial', firma: 'Sí' });
+  for (const i of [1, 2, 3]) await ins('sst_seguridad_social', { proyecto_id: p, mes, trabajador: 'Trabajador de ejemplo ' + i, eps: 'Sí', afp: 'Sí', arl: 'Sí', ccf: 'Sí', verificado: 'Sí' });
+  await ins('sst_emergencia', { proyecto_id: p, fecha: dia(10), tipo: 'Botiquín', escenario: 'Campamento', resultado: 'Completo', estado: 'Cerrado' });
+  await ins('sst_equipo', { proyecto_id: p, equipo: 'Retroexcavadora', placa: 'EQ-001', modelo: '2018', operador: 'Operador de ejemplo', ultimo_preoperacional: dia(5), estado: 'Operativo' });
+  await ins('sst_actividad', { proyecto_id: p, fecha: dia(15), tipo: 'Cronograma SST', actividad: 'Inspección de extintores', responsable: 'Residente SST', estado: 'Ejecutada' });
+  await ins('sst_actividad', { proyecto_id: p, fecha: dia(20), tipo: 'Reunión COPASST', actividad: 'Reunión mensual del COPASST', responsable: 'Contratista', estado: 'Ejecutada' });
+  await ins('sst_mes', { proyecto_id: p, mes, trabajadores: 3, dias_programados: 78, planillas_ok: 'Sí' });
 };

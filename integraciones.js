@@ -241,4 +241,49 @@ function csv(filas) {
   return '﻿' + [cols.join(','), ...filas.map(f => cols.map(c => esc(f[c])).join(','))].join('\r\n');
 }
 
-module.exports = { xlsxPresupuesto, xlsxActa, leerPresupuestoXlsx, docxActa, enLetras, pesos, leerProject, programado, xmlProject, leerLandXML, csv };
+// ---------- Requisiciones (RQ) ----------
+function encabezadoRQ(d) {
+  const r = d.requisicion, c = d.contrato;
+  return [[`Requisición N.º`, r.numero], ['Fecha', r.fecha || ''], ['Estado', r.estado], ['Contrato', c ? `${c.tipo === 'obra' ? 'Obra' : 'Interventoría'} ${c.numero || ''}` : ''],
+    ['Solicitante', r.solicitante || ''], ['Frente', r.frente || ''], ['Justificación', r.justificacion || ''], ['Aprobada por', r.aprobado_por ? `${r.aprobado_por} (${r.fecha_aprobacion || ''})` : ''],
+    ...(r.estado === 'Rechazada' ? [['Motivo del rechazo', r.motivo_rechazo || '']] : []), ...(r.estado === 'Atendida' ? [['Atendida', `${r.fecha_atencion || ''} · ${r.proveedor || ''} · ${r.documento || ''}`]] : [])];
+}
+async function xlsxRequisicion(d) {
+  const libro = new ExcelJS.Workbook(), h = libro.addWorksheet(`RQ ${d.requisicion.numero}`);
+  h.getCell('A1').value = `REQUISICIÓN N.º ${d.requisicion.numero}`; h.getCell('A1').font = { bold: true, size: 13 };
+  let f = 3;
+  for (const [k, v] of encabezadoRQ(d)) { h.getCell(f, 1).value = k; h.getCell(f, 1).font = { bold: true }; h.getCell(f, 2).value = v; f++; }
+  f++;
+  const enc = ['Ítem presupuesto', 'Descripción', 'Und', 'Cantidad', 'Vr. unitario estimado', 'Vr. total'];
+  h.getRow(f).values = enc; h.getRow(f).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  h.getRow(f).eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5FA8' } }; });
+  [16, 50, 8, 12, 20, 20].forEach((w, i) => (h.getColumn(i + 1).width = w));
+  const ini = ++f;
+  for (const x of d.items) {
+    h.getRow(f).values = [x.item_codigo || '', x.descripcion || '', x.unidad || '', x.cantidad, x.vr_unitario];
+    h.getCell(f, 6).value = { formula: `D${f}*E${f}`, result: x.total };
+    h.getCell(f, 4).numFmt = '#,##0.00'; h.getCell(f, 5).numFmt = FORMATO_PESOS; h.getCell(f, 6).numFmt = FORMATO_PESOS; f++;
+  }
+  h.getCell(f, 5).value = 'TOTAL'; h.getCell(f, 5).font = { bold: true };
+  h.getCell(f, 6).value = { formula: `SUM(F${ini}:F${Math.max(ini, f - 1)})`, result: d.total }; h.getCell(f, 6).numFmt = FORMATO_PESOS; h.getCell(f, 6).font = { bold: true };
+  return libro.xlsx.writeBuffer();
+}
+async function docxRequisicion(d) {
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel } = docx;
+  const celda = (texto, opc = {}) => new TableCell({ children: [new Paragraph({ alignment: opc.der ? AlignmentType.RIGHT : AlignmentType.LEFT, children: [new TextRun({ text: String(texto ?? ''), bold: !!opc.negrita, size: 18 })] })] });
+  const p = (texto, opc = {}) => new Paragraph({ spacing: { after: 120 }, alignment: opc.centro ? AlignmentType.CENTER : AlignmentType.LEFT, children: [new TextRun({ text: texto, bold: !!opc.negrita, size: 20 })] });
+  const filas = [new TableRow({ tableHeader: true, children: ['Ítem', 'Descripción', 'Und', 'Cantidad', 'Vr. unitario', 'Vr. total'].map(e => celda(e, { negrita: true })) }),
+    ...d.items.map(x => new TableRow({ children: [celda(x.item_codigo || ''), celda(x.descripcion), celda(x.unidad), celda(cant(x.cantidad), { der: true }), celda(pesos(x.vr_unitario), { der: true }), celda(pesos(x.total), { der: true })] })),
+    new TableRow({ children: [celda(''), celda('TOTAL ESTIMADO', { negrita: true }), celda(''), celda(''), celda(''), celda(pesos(d.total), { der: true, negrita: true })] })];
+  const doc = new Document({ sections: [{ children: [
+    new Paragraph({ heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER, children: [new TextRun(`REQUISICIÓN N.º ${d.requisicion.numero}`)] }),
+    new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: encabezadoRQ(d).map(([k, v]) => new TableRow({ children: [celda(k, { negrita: true }), celda(v)] })) }),
+    p(''), new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: filas }), p(''),
+    p(`Valor estimado: ${pesos(d.total)} (${enLetras(d.total)}).`, { negrita: true }), p(''), p(''),
+    p('______________________________                    ______________________________', { centro: true }),
+    p('Solicitante                                                            Director de interventoría', { centro: true }),
+  ] }] });
+  return Packer.toBuffer(doc);
+}
+
+module.exports = { xlsxRequisicion, docxRequisicion, xlsxPresupuesto, xlsxActa, leerPresupuestoXlsx, docxActa, enLetras, pesos, leerProject, programado, xmlProject, leerLandXML, csv };
