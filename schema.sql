@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS item (
   cantidad REAL DEFAULT 0,
   vr_unitario REAL DEFAULT 0,
   sin_aiu INTEGER DEFAULT 0,      -- 1 = va por fuera del AIU (PMT, PMA...)
-  orden INTEGER DEFAULT 0
+  orden INTEGER DEFAULT 0,
+  otrosi_id INTEGER,              -- ítem no previsto: otrosí que lo aprobó
+  apu TEXT                        -- análisis de precio unitario (JSON)
 );
 
 -- Actas parciales (equivalen a las "estimaciones")
@@ -204,6 +206,213 @@ CREATE TABLE IF NOT EXISTS otrosi (
   objeto TEXT,                      -- qué modifica y por qué
   estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
   polizas_ajustadas TEXT DEFAULT 'No'
+);
+
+-- Programa de obra (importado de Microsoft Project)
+CREATE TABLE IF NOT EXISTS tarea (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  wbs TEXT,
+  nombre TEXT,
+  nivel INTEGER DEFAULT 1,
+  inicio TEXT,
+  fin TEXT,
+  avance_real REAL DEFAULT 0,     -- % ejecutado
+  resumen INTEGER DEFAULT 0,
+  hito INTEGER DEFAULT 0,
+  orden INTEGER DEFAULT 0
+);
+
+-- Alineamientos del corredor (LandXML de Civil 3D o InfraWorks) y tramos con su avance
+CREATE TABLE IF NOT EXISTS alineamiento (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL DEFAULT 0,
+  longitud REAL DEFAULT 0,
+  puntos TEXT                    -- JSON [[este, norte], ...]
+);
+CREATE TABLE IF NOT EXISTS tramo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  alineamiento_id INTEGER REFERENCES alineamiento(id) ON DELETE CASCADE,
+  nombre TEXT,
+  abs_ini REAL,
+  abs_fin REAL,
+  actividad TEXT,
+  avance REAL DEFAULT 0,          -- % ejecutado
+  fecha TEXT,
+  notas TEXT
+);
+
+-- Seguridad y salud en el trabajo (Decreto 1072 de 2015, Res. 0312 de 2019): inspecciones, permisos, incidentes y accidentes
+CREATE TABLE IF NOT EXISTS sst (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,                      -- Inspección, Charla, Permiso de trabajo, Entrega de EPP, Verificación seguridad social, Incidente, Accidente
+  frente TEXT,
+  descripcion TEXT,
+  personas INTEGER,
+  dias_incapacidad INTEGER,       -- solo accidentes
+  hallazgo TEXT,
+  accion TEXT,
+  responsable TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+-- Datos mensuales para los indicadores obligatorios (art. 30 Res. 0312)
+CREATE TABLE IF NOT EXISTS sst_mes (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  mes TEXT,                       -- AAAA-MM
+  trabajadores INTEGER,
+  accidentes INTEGER DEFAULT 0,
+  accidentes_mortales INTEGER DEFAULT 0,
+  dias_incapacidad INTEGER DEFAULT 0,
+  dias_cargados INTEGER DEFAULT 0,
+  dias_ausencia INTEGER DEFAULT 0,  -- ausentismo por causa médica
+  dias_programados INTEGER DEFAULT 0,
+  planillas_ok TEXT DEFAULT 'Pendiente', -- verificación PILA / ARL del contratista
+  notas TEXT
+);
+
+-- Control ambiental: seguimiento a las fichas del PAGA o del PMA
+CREATE TABLE IF NOT EXISTS ambiental (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  programa TEXT,                  -- Gestión institucional, Actividades constructivas, Gestión hídrica, Biótico, Maquinaria y transporte, SST, Gestión social
+  ficha TEXT,                     -- código de la ficha en el PAGA/PMA del proyecto
+  actividad TEXT,
+  indicador TEXT,
+  meta REAL,
+  logro REAL,
+  cantidad REAL,                  -- p. ej. m³ de RCD, árboles talados
+  unidad TEXT,
+  permiso TEXT,                   -- aprovechamiento forestal, ocupación de cauce, vertimientos, sitio de disposición
+  hallazgo TEXT,
+  accion TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Plan de Manejo de Tránsito por frente de obra
+CREATE TABLE IF NOT EXISTS pmt (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  frente TEXT,
+  abs_ini TEXT,
+  abs_fin TEXT,
+  cierre TEXT,                    -- Total, Parcial, Por carril, Nocturno
+  interferencia TEXT,             -- Baja, Media, Alta
+  radicado TEXT,                  -- aprobación de la secretaría de tránsito
+  aprobado TEXT,                  -- fecha de aprobación
+  desde TEXT,
+  hasta TEXT,                     -- vigencia
+  dispositivos TEXT,              -- señales, conos, barricadas, canalizadores, paleteros
+  ultima_inspeccion TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  estado TEXT DEFAULT 'En trámite',
+  notas TEXT
+);
+
+-- Gestión social: fichas del PGS (atención a la comunidad, divulgación, predios, mano de obra local, cultura vial)
+CREATE TABLE IF NOT EXISTS social (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  ficha TEXT,
+  tipo TEXT,                      -- PQRS, Reunión de inicio/avance/finalización, Socialización, Acta de vecindad, Mano de obra local, Cultura vial, Visita
+  comunidad TEXT,
+  descripcion TEXT,
+  asistentes INTEGER,
+  responsable TEXT,
+  respuesta TEXT,
+  plazo TEXT,                     -- PQRS: 15 días hábiles (Ley 1755 de 2015)
+  estado TEXT DEFAULT 'Abierto'
+);
+
+CREATE TABLE IF NOT EXISTS suspension (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER,
+  fecha_suspension TEXT,
+  fecha_reinicio TEXT,              -- vacía mientras siga suspendido
+  motivo TEXT,
+  acta TEXT,                        -- número o referencia del acta de suspensión
+  estado TEXT DEFAULT 'Suspendido', -- Suspendido, Reiniciado
+  polizas_ajustadas TEXT DEFAULT 'No'
+);
+
+CREATE TABLE IF NOT EXISTS liquidacion (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL UNIQUE REFERENCES contrato(id) ON DELETE CASCADE,
+  tipo TEXT DEFAULT 'Bilateral',    -- Bilateral, Unilateral, Judicial
+  fecha_recibo_final TEXT,
+  fecha_liquidacion TEXT,
+  valor_ejecutado REAL DEFAULT 0,
+  saldo_a_favor_contratista REAL DEFAULT 0,
+  saldo_a_favor_entidad REAL DEFAULT 0,
+  devolucion_retenciones REAL DEFAULT 0,
+  paz_y_salvos TEXT,
+  observaciones TEXT,
+  estado TEXT DEFAULT 'En trámite'  -- En trámite, Firmada, Cerrada
+);
+
+-- Cantidades que cada otrosí suma (+) o resta (−) a un ítem del presupuesto
+CREATE TABLE IF NOT EXISTS otrosi_item (
+  id INTEGER PRIMARY KEY,
+  otrosi_id INTEGER NOT NULL REFERENCES otrosi(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
+  cantidad REAL DEFAULT 0,
+  vr_unitario REAL                  -- opcional, para ítems nuevos
+);
+
+-- Archivos adjuntos y registro fotográfico de cualquier registro (póliza, acta, otrosí, SST...)
+-- El contenido va aparte (adjunto_dato) para que las listas carguen rápido; ambos se sincronizan con Turso
+CREATE TABLE IF NOT EXISTS adjunto (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  tabla TEXT,                     -- a qué pertenece: poliza, acta, otrosi... o 'proyecto' para el registro general
+  registro_id INTEGER,
+  categoria TEXT DEFAULT 'Documento', -- Documento, Foto
+  nombre TEXT,
+  tipo_mime TEXT,
+  tamano INTEGER,
+  fecha TEXT,
+  frente TEXT,
+  abscisa TEXT,
+  punto TEXT,                     -- punto fijo de toma (fotos comparables en el tiempo)
+  descripcion TEXT,
+  lat REAL,
+  lon REAL,
+  usuario TEXT,
+  creado TEXT
+);
+CREATE TABLE IF NOT EXISTS adjunto_dato (
+  adjunto_id INTEGER PRIMARY KEY REFERENCES adjunto(id) ON DELETE CASCADE,
+  datos BLOB
+);
+
+-- Captura de avance en campo: memoria de cantidades por abscisa con registro fotográfico.
+-- La cantidad entra sola a la cantidad presentada del acta en borrador del periodo.
+CREATE TABLE IF NOT EXISTS avance (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  contrato_id INTEGER REFERENCES contrato(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  abs_ini REAL,                   -- metros
+  abs_fin REAL,
+  largo REAL, ancho REAL, espesor REAL, piezas REAL,
+  cantidad REAL DEFAULT 0,
+  descripcion TEXT,
+  estado TEXT DEFAULT 'Reportado', -- Reportado, Verificado, Rechazado
+  acta_id INTEGER,                 -- acta a la que se sumó
+  usuario TEXT,
+  lat REAL, lon REAL
 );
 
 -- Lista de chequeo documental de cada acta (hoja de ruta, punto 9)
