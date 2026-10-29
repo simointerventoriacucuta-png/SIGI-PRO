@@ -179,6 +179,9 @@ async function iniciar() {
   const colCorr = (await db.all('PRAGMA table_info(correspondencia)')).map(c => c.name);
   for (const c of ['origen', 'message_id', 'resumen_ia', 'vencimientos_ia']) if (!colCorr.includes(c)) await db.run(`ALTER TABLE correspondencia ADD COLUMN ${c} TEXT`);
   await db.run('CREATE INDEX IF NOT EXISTS correspondencia_mid ON correspondencia (message_id)');
+  // Bitácora tipo libreta: hora, incidentes, visitas y firmas (bases creadas antes de estas columnas)
+  const colBit = (await db.all('PRAGMA table_info(bitacora)')).map(c => c.name);
+  for (const c of ['hora', 'incidentes', 'visitas', 'firma_residente', 'firma_interventoria']) if (!colBit.includes(c)) await db.run(`ALTER TABLE bitacora ADD COLUMN ${c} TEXT`);
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)

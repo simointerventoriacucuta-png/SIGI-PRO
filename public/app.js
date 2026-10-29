@@ -23,10 +23,27 @@ function num(s) {
 }
 
 async function api(ruta, metodo = 'GET', cuerpo) {
-  const r = await fetch('/api/' + ruta, { method: metodo, headers: { 'Content-Type': 'application/json', 'X-Usuario': E.usuario?.id || '' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
-  const d = await r.json();
-  if (!r.ok || (d && d.error)) throw new Error(d.error || r.statusText);
-  return d;
+  cargando(1);
+  try {
+    const r = await fetch('/api/' + ruta, { method: metodo, headers: { 'Content-Type': 'application/json', 'X-Usuario': E.usuario?.id || '' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+    const d = await r.json();
+    if (!r.ok || (d && d.error)) throw new Error(d.error || r.statusText);
+    if (metodo !== 'GET' && !ruta.startsWith('asistente')) toast(metodo === 'DELETE' ? 'Eliminado' : 'Guardado');
+    return d;
+  } finally { cargando(-1); }
+}
+// Indicador de carga (barra fina arriba, solo si tarda más de 250 ms) y avisos flotantes
+function cargando(d) {
+  cargando.n = Math.max(0, (cargando.n || 0) + d);
+  const b = document.getElementById('carga'); if (!b) return;
+  clearTimeout(cargando.t);
+  if (cargando.n) cargando.t = setTimeout(() => b.classList.add('activa'), 250); else b.classList.remove('activa');
+}
+function toast(t) {
+  const z = document.getElementById('toasts'); if (!z) return;
+  const el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); el.textContent = '✓ ' + t;
+  z.querySelectorAll('.toast').forEach(x => x.remove());
+  z.append(el); setTimeout(() => el.classList.add('sale'), 1600); setTimeout(() => el.remove(), 2000);
 }
 function aviso(t) { $('#estado-mensaje').textContent = t; clearTimeout(aviso.t); aviso.t = setTimeout(() => ($('#estado-mensaje').textContent = ''), 4000); }
 function descargar(nombre, texto, tipo = 'text/csv;charset=utf-8') {
@@ -147,7 +164,7 @@ if (leerLocal('cinta-plegada')) $('.cinta').classList.add('plegada');
 function menuArchivo() {
   const m = $('#menu-archivo');
   const ops = [['✦ Leer documento con IA', leerDocumentoIA], null, ['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
-    ['Informe mensual (Word)', informeMensual], null, ['Sincronización entre computadores', dialogoSync], ['Correo (Gmail)', dialogoCorreo], ['Usuarios', () => abrir('usuarios')], ['Auditoría', () => abrir('auditoria')], ['Cambiar de usuario', elegirUsuario], null, ['Acerca de SIGI Pro', () => $('#btn-acerca').click()]];
+    ['Informe mensual (Word)', informeMensual], null, ['Sincronización entre computadores', dialogoSync], ['Correo (Gmail)', dialogoCorreo], ['Usuarios', () => abrir('usuarios')], ['Auditoría', () => abrir('auditoria')], ['Cambiar de usuario', elegirUsuario], null, ['Modo claro / oscuro', alternarTema], ['Acerca de SIGI Pro', () => $('#btn-acerca').click()]];
   m.innerHTML = ops.map((o, i) => (o ? `<button data-i="${i}">${o[0]}</button>` : '<hr>')).join('');
   m.hidden = !m.hidden;
   m.onclick = e => { const b = e.target.closest('[data-i]'); if (b) { m.hidden = true; ops[b.dataset.i][1](); } };
@@ -525,7 +542,7 @@ async function vPresupuesto(cont, id) {
   <div class="grilla-cont"><table class="grilla congelar" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
   ${d.items.map(it => it.tipo === 0
     ? `<tr class="cap ${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}<td></td><td></td><td></td><td class="num">${pesos(subt[it.id] || 0)}</td><td></td><td></td><td></td><td></td></tr>`
-    : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}<td class="num" ${it.cantidad_vigente !== it.cantidad ? 'style="color:#b26a00;font-weight:600"' : ''}>${fmt(it.cantidad_vigente)}</td><td class="num">${pesos(it.cantidad_vigente * it.vr_unitario)}</td><td>${it.otrosi_id || it.apu ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}</td></tr>`).join('')}
+    : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}<td class="num" ${it.cantidad_vigente !== it.cantidad ? 'style="color:var(--ambar);font-weight:600"' : ''}>${fmt(it.cantidad_vigente)}</td><td class="num">${pesos(it.cantidad_vigente * it.vr_unitario)}</td><td>${it.otrosi_id || it.apu ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}</td></tr>`).join('')}
   </tbody><tfoot><tr><td></td><td>${d.items.filter(i => i.tipo === 1).length} ítems · costo directo ${pesos(d.totales.costo_directo)}</td><td></td><td></td><td>TOTAL</td><td class="num">${pesos(d.totales.total)}</td><td></td><td>Vigente</td><td class="num">${pesos(d.totales_vigentes.total)}</td><td></td></tr></tfoot></table></div>
   <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Presupuesto original</h3>${tablaTotales(d.totales)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Vigente (con otrosíes firmados)</h3>${tablaTotales(d.totales_vigentes)}</div></div>`;
   const g = $('#g-pres');
@@ -629,7 +646,7 @@ async function vActa(cont, id) {
     <th class="num">Presentada</th><th class="num">Aprobada</th><th class="num">Acumulada</th><th class="num">Saldo</th><th class="num">% ejec.</th><th class="num">Vr. esta acta</th><th class="num">Vr. acumulado</th><th>Observación</th></tr></thead><tbody>
   ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="9">${esc(f.descripcion)}</td><td class="num">${sc[f.id]?.c ? pct(sc[f.id].ac / sc[f.id].c) : ''}</td><td class="num">${pesos(sc[f.id]?.a || 0)}</td><td class="num">${pesos(sc[f.id]?.ac || 0)}</td><td></td></tr>`
     : `<tr data-id="${f.id}" class="${f.saldo < -1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num" title="Original ${fmt(f.cantidad)}">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.vr_unitario)}</td>
-      <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
+      <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:var(--ambar);font-weight:600"' : '')}
       <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${semaforo(f.pct)} ${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
   </tbody><tfoot><tr><td></td><td>Costo directo · presentado ${pesos(sum('vr_presentado'))}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num">${contratado ? pct(sum('vr_acumulado') / contratado) : ''}</td><td class="num">${pesos(sum('vr_acta'))}</td><td class="num">${pesos(sum('vr_acumulado'))}</td><td></td></tr></tfoot></table></div>
   <p class="letras"><b>Valor de esta ${esObra ? 'acta' : 'cuenta'}:</b> ${pesos(t.acta.total)} · SON: ${enLetras(t.acta.total)}</p>  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
@@ -789,7 +806,7 @@ async function vPrograma(cont) {
   </div>
   <div class="grilla-cont"><table class="grilla" id="g-programa"><thead><tr><th>EDT</th><th>Actividad</th><th>Inicio</th><th>Fin</th><th class="num">Programado</th><th class="num">Real %</th><th style="width:38%">Diagrama</th></tr></thead><tbody>
   ${d.tareas.map(x => `<tr data-id="${x.id}" class="${x.resumen ? 'cap' : ''}"><td>${esc(x.wbs)}</td><td style="padding-left:${(x.nivel - 1) * 14 + 6}px">${esc(x.nombre)}</td><td>${fechaLarga(x.inicio)}</td><td>${fechaLarga(x.fin)}</td>
-    <td class="num">${fmt(x.programado, 1)} %</td>${x.resumen ? `<td class="num">${fmt(x.avance_real, 1)}</td>` : celda(x.avance_real, 'avance_real', 'num', x.avance_real + 5 < x.programado ? 'style="color:#c62828;font-weight:600"' : '')}
+    <td class="num">${fmt(x.programado, 1)} %</td>${x.resumen ? `<td class="num">${fmt(x.avance_real, 1)}</td>` : celda(x.avance_real, 'avance_real', 'num', x.avance_real + 5 < x.programado ? 'style="color:var(--rojo);font-weight:600"' : '')}
     <td><div class="gantt">${x.inicio && x.fin ? `<i style="left:${X(x.inicio)}%;width:${Math.max(0.6, X(x.fin) - X(x.inicio))}%"><b style="width:${Math.min(100, x.avance_real)}%"></b></i>` : ''}<s style="left:${X(d.hoy)}%"></s></div></td></tr>`).join('') || '<tr><td colspan="7" class="sub">Importe el programa desde Microsoft Project</td></tr>'}
   </tbody></table></div>`;
   editable($('#g-programa'), (td, v) => api('t/tarea/' + td.closest('tr').dataset.id, 'PUT', { avance_real: v }));
@@ -1323,6 +1340,7 @@ document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.ke
 async function pintarCampana() {
   try { E.avisos = await api('avisos/' + E.pid); } catch { return; }
   const n = $('#campana-n'); n.hidden = !E.avisos.length; n.textContent = E.avisos.length;
+  if (E.avisos.length) { const b = $('#btn-campana'); b.classList.remove('rebote'); void b.offsetWidth; b.classList.add('rebote'); }
   $('#panel-avisos').innerHTML = E.avisos.map((v, k) => { const d = dias(v.fecha);
     return `<div class="aviso-fila ${d < 0 ? 'vencido' : ''}" data-k="${k}"><div class="f">${fechaLarga(v.fecha)} · ${d < 0 ? 'vencido hace ' + -d + ' d' : d === 0 ? 'HOY' : 'faltan ' + d + ' d'} · ${esc(v.tipo)}</div>${esc(v.texto)}</div>`; }).join('') || '<p class="sub" style="padding:10px">Nada vence en los próximos 7 días.</p>';
 }
@@ -1451,12 +1469,13 @@ function informeSST() {
   if (mes && /^\d{4}-\d{2}$/.test(mes)) location.href = `/api/docx/informe-sst/${E.pid}?mes=${mes}`;
 }
 const PROGRAMAS_AMB = 'Desarrollo y aplicación de la gestión ambiental (DAGA)|Actividades constructivas|Gestión hídrica|Biótico (flora y fauna)|Instalaciones temporales, maquinaria y equipos|Gestión social|Seguridad y salud en el trabajo';
+const CLIMA = { Seco: '☀️', Nublado: '⛅', 'Lluvia intermitente': '🌦️', Lluvia: '🌧️', Tormenta: '⛈️' };
 const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
   personal: { titulo: 'Personal de interventoría', cols: [['nombre', 'Nombre'], ['cargo', 'Cargo'], ['dedicacion', 'Dedicación %', 'num'], ['cedula', 'Cédula'], ['matricula', 'Matrícula'], ['telefono', 'Teléfono'], ['correo', 'Correo'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   poliza: { titulo: 'Pólizas y garantías', cols: [['contrato', 'Contrato'], ['amparo', 'Amparo'], ['porcentaje', '%', 'num'], ['valor', 'Valor asegurado', 'num'], ['aseguradora', 'Aseguradora'], ['numero', 'N.º póliza'], ['desde', 'Desde', 'date'], ['hasta', 'Hasta', 'date'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   correspondencia: { titulo: 'Correspondencia', cols: [['fecha', 'Fecha', 'date'], ['sentido', 'Sentido', 'select:Recibida|Enviada'], ['radicado', 'Radicado'], ['de', 'De'], ['para', 'Para'], ['asunto', 'Asunto'], ['requiere_respuesta', '¿Responder?', 'select:Sí|No'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select'], ['archivo', 'Archivo'], ['resumen_ia', 'Resumen (IA)', 'ia']] },
-  bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['clima', 'Clima', 'select:Seco|Lluvia|Lluvia intermitente'], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['observaciones', 'Observaciones']] },
+  bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['hora', 'Hora'], ['clima', 'Clima', 'select:' + Object.keys(CLIMA).join('|')], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['incidentes', 'Incidentes'], ['visitas', 'Visitas'], ['observaciones', 'Observaciones'], ['firma_residente', 'Firma residente'], ['firma_interventoria', 'Firma interventoría']] },
   sst: { titulo: 'SST · inspecciones, permisos y accidentes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inspección|Charla|Permiso de trabajo|Entrega de EPP|Verificación seguridad social (PILA/ARL)|Trabajo en alturas|Simulacro|Incidente|Accidente'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['personas', 'Personas', 'num'], ['dias_incapacidad', 'Días incap.', 'num'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   sst_mes: { titulo: 'SST · datos mensuales (Res. 0312 de 2019)', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajadores', 'Trabajadores', 'num'], ['accidentes', 'Accidentes', 'num'], ['accidentes_mortales', 'Mortales', 'num'], ['dias_incapacidad', 'Días incapacidad', 'num'], ['dias_cargados', 'Días cargados', 'num'], ['dias_ausencia', 'Días ausencia', 'num'], ['dias_programados', 'Días programados', 'num'], ['planillas_ok', 'PILA/ARL verificada', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
   sst_peligro: { titulo: 'SST · matriz de peligros (GTC 45)', cols: [['proceso', 'Proceso'], ['actividad', 'Actividad'], ['rutinaria', 'Rutinaria', 'select:Sí|No'], ['peligro', 'Peligro'], ['clasificacion', 'Clasificación', 'select:Biológico|Físico|Químico|Psicosocial|Biomecánico|Condiciones de seguridad|Fenómenos naturales'], ['efectos', 'Efectos posibles'], ['controles', 'Controles existentes'], ['nd', 'ND', 'select:10|6|2|0'], ['ne', 'NE', 'select:4|3|2|1'], ['nc', 'NC', 'select:100|60|25|10'], ['np', 'NP', 'ro'], ['nr', 'NR', 'ro'], ['nivel', 'Nivel', 'ro'], ['expuestos', 'Expuestos', 'num'], ['intervencion', 'Medida de intervención'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
@@ -1476,15 +1495,93 @@ const TABLAS = {
   social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   ensayo: { titulo: 'Ensayos de laboratorio', cols: [['fecha', 'Fecha', 'date'], ['ensayo', 'Ensayo'], ['norma', 'Norma'], ['item', 'Ítem'], ['abscisa', 'Abscisa'], ['resultado', 'Resultado'], ['especificacion', 'Especificación'], ['cumple', 'Cumple', 'select:Sí|No|Pendiente'], ['laboratorio', 'Laboratorio']] },
 };
+// ---------- Bitácora de obra con aspecto de libreta (una hoja por anotación) ----------
+async function vBitacora(cont) {
+  const todas = await api(`t/bitacora?proyecto_id=${E.pid}`); // fecha DESC
+  const q = (E.bitBuscar || '').toLowerCase();
+  const filas = q ? todas.filter(f => Object.values(f).some(v => String(v ?? '').toLowerCase().includes(q))) : todas;
+  if (E.bitId && !filas.some(f => f.id === E.bitId)) E.bitId = null;
+  const i = Math.max(0, filas.findIndex(f => f.id === E.bitId)), f = filas[i];
+  const barra = `<div class="barra-herr"><h2 style="margin:0">📓 Bitácora de obra</h2><span class="esp"></span>
+    <input type="search" id="bit-buscar" class="bit-buscar" placeholder="Buscar en la bitácora…" value="${esc(E.bitBuscar || '')}" aria-label="Buscar en la bitácora">
+    <button class="btn" id="bit-tabla" title="Ver todas las anotaciones como tabla">▦ Ver como tabla</button>
+    <button class="btn prim" id="bit-hoy">✎ Nueva anotación de hoy</button></div>`;
+  const nuevaHoy = async () => {
+    const ya = todas.find(x => x.fecha === hoyISO());
+    if (ya) { E.bitId = ya.id; E.bitBuscar = ''; return pintarDocs(); }
+    try { const r = await api('t/bitacora', 'POST', { proyecto_id: E.pid, fecha: hoyISO(), hora: new Date().toTimeString().slice(0, 5) }); E.bitId = r.id || null; E.bitBuscar = ''; refrescar(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+  const comunes = () => {
+    $('#bit-tabla').onclick = () => { E.bitVista = 'tabla'; pintarDocs(); };
+    $('#bit-hoy').onclick = nuevaHoy;
+    $('#bit-buscar').onchange = e => { E.bitBuscar = e.target.value.trim(); E.bitId = null; pintarDocs(); };
+  };
+  if (!f) {
+    cont.innerHTML = barra + `<div class="vacio">${q ? 'Ninguna anotación coincide con la búsqueda.' : 'La bitácora está vacía. Pulse «Nueva anotación de hoy» para escribir la primera hoja.'}</div>`;
+    return comunes();
+  }
+  const fotos = (await api(`adjuntos/${E.pid}?tabla=bitacora&registro_id=${f.id}`))
+    .concat((await api(`adjuntos/${E.pid}?categoria=Foto&mes=${String(f.fecha || '').slice(0, 7)}`)).filter(a => a.fecha === f.fecha && !(a.tabla === 'bitacora' && a.registro_id === f.id)));
+  const d = f.fecha ? new Date(f.fecha + 'T00:00:00') : null;
+  const etiquetas = s => String(s || '').split(/[,;\n]/).map(t => t.trim()).filter(Boolean).map(t => `<span class="etiqueta">${esc(t)}</span>`).join('') || '<span class="sub">—</span>';
+  const campo = (k, t, filas = 3, ph = '') => `<label class="bit-campo"><span class="bit-et">${t}</span><textarea data-c="${k}" rows="${filas}" placeholder="${ph}">${esc(f[k] || '')}</textarea></label>`;
+  const firma = (k, t) => `<div class="firma ${f[k] ? 'firmada' : ''}"><div class="firma-linea">${f[k] ? `<span class="firma-nombre">${esc(f[k])}</span>` : `<button type="button" class="btn" data-firmar="${k}">Firmar</button>`}</div><div class="firma-rol">${t}${f[k] ? ` <button type="button" class="enlace" data-quitar-firma="${k}" title="Quitar firma">quitar</button>` : ''}</div></div>`;
+  cont.innerHTML = barra + `<div class="libreta">
+    <div class="libreta-nav">
+      <button class="btn" id="bit-ant" ${i >= filas.length - 1 ? 'disabled' : ''} title="Día anterior">‹ Anterior</button>
+      <span class="sub">Hoja ${filas.length - i} de ${filas.length}${q ? ' (filtradas)' : ''}</span>
+      <button class="btn" id="bit-sig" ${i <= 0 ? 'disabled' : ''} title="Día siguiente">Siguiente ›</button>
+    </div>
+    <article class="hoja" data-id="${f.id}">
+      <header class="hoja-cab">
+        <div class="hoja-fecha"><b>${d ? d.getDate() : '—'}</b><span>${d ? d.toLocaleDateString('es-CO', { weekday: 'long' }) : ''}<br>${d ? d.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }) : ''}</span></div>
+        <div class="hoja-datos">
+          <label>Fecha <input type="date" data-c="fecha" value="${esc(f.fecha || '')}"></label>
+          <label>Hora <input type="time" data-c="hora" value="${esc(f.hora || '')}"></label>
+          <label>Clima <span class="clima-ico" aria-hidden="true">${CLIMA[f.clima] || '🌤️'}</span><select data-c="clima"><option value=""></option>${Object.keys(CLIMA).map(c => `<option ${c === f.clima ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+          <label>Frente / abscisa <input data-c="frente" value="${esc(f.frente || '')}" placeholder="K0+000 – K0+250"></label>
+        </div>
+      </header>
+      ${campo('actividades', 'Actividades del día', 5, 'Qué se hizo hoy, dónde y con qué avance…')}
+      <div class="bit-dos">
+        <label class="bit-campo"><span class="bit-et">Personal en obra</span><input type="number" min="0" data-c="personal_obra" value="${f.personal_obra ?? ''}"></label>
+        <div class="bit-campo"><span class="bit-et">Equipos</span><div class="etiquetas">${etiquetas(f.equipos)}</div><input data-c="equipos" value="${esc(f.equipos || '')}" placeholder="Separe con comas: retroexcavadora, vibrocompactador…"></div>
+      </div>
+      ${campo('incidentes', 'Incidentes', 2, 'Accidentes, daños, suspensiones…')}
+      ${campo('visitas', 'Visitas', 2, 'Entidad, supervisor, comunidad…')}
+      ${campo('observaciones', 'Observaciones e instrucciones de la interventoría', 3)}
+      <div class="bit-campo"><span class="bit-et">Fotos del día <button class="btn clip" data-adj="bitacora:${f.id}" title="Agregar fotos a esta hoja">📎 Agregar</button></span>
+        ${fotos.length ? `<div class="bit-fotos">${fotos.map(a => `<a href="/api/adjunto/${a.id}/archivo" target="_blank" title="${esc(a.descripcion || a.nombre || '')}"><img src="/api/adjunto/${a.id}/archivo" loading="lazy" alt="${esc(a.descripcion || 'Foto')}"></a>`).join('')}</div>` : '<p class="sub">Sin fotos para este día.</p>'}</div>
+      <footer class="firmas">${firma('firma_residente', 'Residente de obra (contratista)')}${firma('firma_interventoria', 'Interventoría')}</footer>
+    </article></div>`;
+  comunes();
+  $('#bit-ant').onclick = () => { E.bitId = filas[i + 1].id; pintarDocs(); };
+  $('#bit-sig').onclick = () => { E.bitId = filas[i - 1].id; pintarDocs(); };
+  E.bitId = f.id;
+  const hoja = cont.querySelector('.hoja');
+  const guardar = async (k, v) => { try { await api('t/bitacora/' + f.id, 'PUT', { [k]: v }); } catch (e) { aviso('Error: ' + e.message); } };
+  hoja.addEventListener('change', async e => {
+    const el = e.target.closest('[data-c]'); if (!el) return;
+    const k = el.dataset.c, v = el.type === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value;
+    await guardar(k, v);
+    if (['fecha', 'clima', 'equipos'].includes(k)) pintarDocs();
+  });
+  hoja.addEventListener('click', async e => {
+    const fb = e.target.closest('[data-firmar]'), qb = e.target.closest('[data-quitar-firma]');
+    if (fb) { await guardar(fb.dataset.firmar, `${E.usuario?.nombre || 'Sin usuario'} · ${fechaLarga(hoyISO())}`); pintarDocs(); }
+    if (qb && confirm('¿Quitar esta firma?')) { await guardar(qb.dataset.quitarFirma, null); pintarDocs(); }
+  });
+}
 async function vTabla(cont, tabla) {
+  if (tabla === 'bitacora' && E.bitVista !== 'tabla') return vBitacora(cont);
   const def = TABLAS[tabla], filas = await api(`t/${tabla}?proyecto_id=${E.pid}`);
   const op = t => (t.startsWith('select:') ? t.slice(7) : ESTADOS[tabla] || '');
-  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${def.titulo}</h2><span class="esp"></span><button class="btn prim" id="t-nuevo">+ Nueva fila</button></div>
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${def.titulo}</h2><span class="esp"></span>${tabla === 'bitacora' ? '<button class="btn" id="t-libreta">📓 Ver como libreta</button>' : ''}<button class="btn prim" id="t-nuevo">+ Nueva fila</button></div>
   <div class="grilla-cont"><table class="grilla" id="g-tabla"><thead><tr>${def.cols.map(c => `<th class="${c[2] === 'num' ? 'num' : ''}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody>
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
     if (t === 'ro') return `<td class="${typeof f[k] === 'number' ? 'num' : ''}" title="Calculado">${typeof f[k] === 'number' ? fmt(f[k], k === 'cumplimiento' ? 1 : 0) : esc(f[k] ?? '')}</td>`;
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
-    if (['fecha', 'plazo', 'hasta', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
+    if (['fecha', 'plazo', 'hasta', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:var(--rojo);font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
     if (t === 'ia') { const vs = f.vencimientos_ia ? JSON.parse(f.vencimientos_ia) : [];
       return `<td class="sub" style="max-width:320px;white-space:normal">${esc(f[k] || '')}${vs.length ? `<br><button class="btn prim" data-venc="${f.id}" title="${esc(vs.map(v => (v.fecha || 'sin fecha') + ' · ' + v.descripcion).join('\n'))}">Crear vencimientos sugeridos (${vs.length})</button>` : ''}</td>`; }
     return celda(f[k], k, t);
@@ -1506,6 +1603,7 @@ async function vTabla(cont, tabla) {
     if (v) { if (!confirm('¿Crear los vencimientos que sugirió la IA?\n\n' + v.title)) return; try { const r = await api('correo/vencimientos/' + v.dataset.venc, 'POST'); aviso(r.creados + ' vencimientos creados'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } return; }
   });
   g.addEventListener('click', async e => { const ch = e.target.closest('[data-chequeo]'); if (ch) return dialogoChequeo(Number(ch.dataset.chequeo)); const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
+  if ($('#t-libreta')) $('#t-libreta').onclick = () => { E.bitVista = 'libreta'; pintarDocs(); };
   $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_epp', 'sst_investigacion', 'sst_emergencia', 'sst_actividad'].includes(tabla) ? { fecha: hoyISO() } : ['sst_mes', 'sst_seguridad_social', 'sst_documento'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
@@ -1867,6 +1965,16 @@ $('#btn-acerca').onclick = () => {
     <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
   $('#dialogo').showModal();
 };
+// Tema claro / oscuro (solo presentación; se guarda en este equipo)
+function pintarTema() { const os = document.documentElement.dataset.tema === 'oscuro'; const b = $('#btn-tema'); b.setAttribute('aria-pressed', String(os)); b.textContent = os ? '☀️' : '🌙'; b.title = os ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'; }
+function alternarTema() {
+  const os = document.documentElement.dataset.tema !== 'oscuro';
+  if (os) document.documentElement.dataset.tema = 'oscuro'; else delete document.documentElement.dataset.tema;
+  try { localStorage.setItem('sigi-tema', os ? 'oscuro' : 'claro'); } catch (e) {}
+  pintarTema();
+}
+$('#btn-tema').onclick = alternarTema; pintarTema();
+$('#zoom').setAttribute('aria-label', 'Zoom');
 $('#zoom').addEventListener('input', e => { document.body.style.zoom = e.target.value / 100; guardarLocal('zoom', e.target.value); });
 const z = leerLocal('zoom'); if (z) { $('#zoom').value = z; document.body.style.zoom = z / 100; }
 $('#hoy').textContent = new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
