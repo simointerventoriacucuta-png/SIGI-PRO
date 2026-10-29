@@ -85,14 +85,14 @@ const CINTA = {
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
   obra: ['Ejecución de obra', [
-    ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')]]],
+    ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')]]],
     EDITAR_PRES,
     ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa], ['Exportar acta', 'exportar', exportarActa, enActa]]],
     ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')]]],
     ['Análisis', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores', 'mayores', ab('obra', 'mayores')]]],
   ]],
   interventoria: ['Contrato de interventoría', [
-    ['Contrato propio', [['Contrato de interventoría', 'contrato', () => abrir('contrato:interventoria')], ['Presupuesto de interventoría', 'presupuesto', ab('interventoria', 'presupuesto')]]],
+    ['Contrato propio', [['Contrato de interventoría', 'contrato', () => abrir('contrato:interventoria')], ['Presupuesto de interventoría', 'presupuesto', ab('interventoria', 'presupuesto')], ['Otrosíes', 'datos', ab('interventoria', 'otrosis')]]],
     EDITAR_PRES,
     ['Facturación', [['Nueva cuenta de cobro', 'acta', () => nuevaActa('interventoria')], ['Balance de facturación', 'balance', ab('interventoria', 'balance')]]],
     ['Costos reales', [['Registrar gastos', 'gasto', ab('interventoria', 'gastos')], ['Control de costos', 'costos', ab('interventoria', 'costos')]]],
@@ -126,14 +126,14 @@ function pintarArbol() {
   let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia);
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
-    h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems');
+    h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length);
     h += n('', '📁 Actas parciales', 0, ob.actas.length, true) + ob.actas.map(a => n('acta:' + a.id, `Acta ${a.numero}`, 1, a.estado)).join('');
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0);
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
   if (it) {
-    h += n('contrato:interventoria', '📄 Contrato de interventoría', 0, it.numero || '') + n('presupuesto:' + it.id, '📗 Presupuesto', 0, it.items + ' ítems');
+    h += n('contrato:interventoria', '📄 Contrato de interventoría', 0, it.numero || '') + n('presupuesto:' + it.id, '📗 Presupuesto', 0, it.items + ' ítems') + n('otrosis:' + it.id, '📝 Otrosíes', 0, it.otrosis.length);
     h += n('', '📁 Cuentas de cobro', 0, it.actas.length, true) + it.actas.map(a => n('acta:' + a.id, `Cuenta ${a.numero}`, 1, a.estado)).join('');
     h += n('gastos:' + it.id, '💵 Gastos reales', 0) + n('costos:' + it.id, '🎯 Control de costos', 0);
     h += n('tabla:personal', '👷 Personal', 0, r.conteos.personal) + n('tabla:poliza', '🛡️ Pólizas', 0, r.conteos.poliza);
@@ -151,7 +151,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría' }[t] || k;
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
 function cintaDe(k) {
@@ -185,7 +185,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis }[t];
     await vista(cont, x);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
@@ -231,7 +231,7 @@ async function vTablero(cont) {
   </div>
   <div class="seccion interv">CONTRATO DE INTERVENTORÍA ${esc(it?.numero || '')} · ${esc(it?.contratista || '')}</div>
   <div class="tarjetas">
-    ${tarj('Valor del contrato', pesos(it?.valor), esc(it?.estado || '') + (it && Math.abs(it.presupuesto - it.valor) > 1 ? ' · el presupuesto difiere' : ' · presupuesto cuadra'))}
+    ${tarj('Valor del contrato', pesos(it?.valor_vigente), esc(it?.estado || '') + (it && Math.abs(it.presupuesto - it.valor) > 1 ? ' · el presupuesto difiere' : ' · presupuesto cuadra'))}
     ${tarj('Facturado (cuentas de cobro)', pesos(it?.ejecutado), pct(avIt) + ' del contrato', avIt)}
     ${tarj('Gastado real', pesos(it?.gastado), pct(pGas) + ' del costo directo', pGas)}
     ${tarj('Utilidad a la fecha', pesos((it?.ejecutado || 0) - (it?.gastado || 0)), 'Facturado − gastado (antes de impuestos)')}
@@ -374,6 +374,26 @@ async function nuevaActa(tipo) {
   const a = await api('t/acta', 'POST', { contrato_id: c.id, desde, fecha: hoyISO(), estado: 'Borrador' });
   await refrescar(); abrir('acta:' + a.id); aviso('Acta ' + a.numero + ' creada');
 }
+// ---------- Otrosíes: historial del valor y del plazo ----------
+async function vOtrosis(cont, cid) {
+  const c = E.res.contratos.find(x => String(x.id) === cid);
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Otrosíes y modificaciones · contrato ${esc(c.numero || '')}</h2><span class="esp"></span><button class="btn prim" id="o-nuevo">+ Nuevo otrosí</button></div>
+  <div class="tarjetas">
+    <div class="tarjeta"><div class="et">Valor original</div><div class="va">${pesos(c.valor)}</div></div>
+    <div class="tarjeta"><div class="et">Adiciones firmadas</div><div class="va">${pesos(c.adiciones)}</div><div class="no">${c.valor ? pct(c.adiciones / c.valor) + ' del original' + (c.adiciones > c.valor / 2 ? ' · supera el 50 % (art. 40 Ley 80)' : '') : ''}</div></div>
+    <div class="tarjeta"><div class="et">Valor vigente</div><div class="va">${pesos(c.valor_vigente)}</div></div>
+    <div class="tarjeta"><div class="et">Plazo</div><div class="va">${esc(c.plazo || '—')}${c.prorroga_dias ? ' + ' + c.prorroga_dias + ' d' : ''}</div><div class="no">Terminación vigente: ${fechaLarga(c.fecha_fin_vigente) || '—'}</div></div>
+  </div>
+  <div class="grilla-cont"><table class="grilla" id="g-otrosi"><thead><tr><th>N.º</th><th>Fecha</th><th>Tipo</th><th class="num">Valor adicionado</th><th class="num">Días de prórroga</th><th>Objeto / justificación</th><th>Estado</th><th>¿Pólizas ajustadas?</th><th></th></tr></thead><tbody>
+  ${c.otrosis.map(o => `<tr data-id="${o.id}"><td>${o.numero}</td>${celda(o.fecha, 'fecha', 'date')}${celda(o.tipo, 'tipo', 'select', 'data-op="Adición|Prórroga|Adición y prórroga|Modificación|Suspensión"')}${celda(o.valor, 'valor', 'num')}${celda(o.dias, 'dias', 'num')}${celda(o.objeto, 'objeto')}${celda(o.estado, 'estado', 'select', 'data-op="En trámite|Firmado|Anulado"')}${celda(o.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"', )}<td><button class="btn" data-borrar="${o.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin otrosíes</td></tr>'}
+  </tbody></table></div>
+  <p class="sub">Solo los otrosíes en estado Firmado suman al valor y al plazo vigentes. Mientras las pólizas no estén ajustadas, la campana lo recuerda.</p>`;
+  const g = $('#g-otrosi');
+  editable(g, (td, v) => api('t/otrosi/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este otrosí?')) { try { await api('t/otrosi/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
+  $('#o-nuevo').onclick = async () => { try { await api('t/otrosi', 'POST', { contrato_id: c.id, fecha: hoyISO(), estado: 'En trámite' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+}
+
 // ---------- Usuarios y auditoría ----------
 const ROL = { director: 'Director', residente: 'Residente', especialista: 'Especialista', administrativo: 'Administrativo', entidad: 'Entidad (solo consulta)' };
 async function vUsuarios(cont) {
@@ -662,7 +682,7 @@ async function cargarProyectos(elegir) {
 $('#sel-proyecto').addEventListener('change', e => cargarProyectos(e.target.value));
 function estadoProyecto() {
   const it = contrato('interventoria');
-  $('#estado-proyecto').textContent = `${E.res.proyecto.nombre} · interventoría ${it?.numero || ''} ${it ? pesos(it.valor) : ''}`;
+  $('#estado-proyecto').textContent = `${E.res.proyecto.nombre} · interventoría ${it?.numero || ''} ${it ? pesos(it.valor_vigente) : ''}`;
 }
 // Versión (la pasa la app de escritorio en la URL) y ventana "Acerca de"
 const VERSION = new URLSearchParams(location.search).get('v') || 'desarrollo';

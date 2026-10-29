@@ -23,7 +23,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
    - Un documento aprobado queda bloqueado.
 3. ✅ **Estados con barra de pasos** (hecho) (M3) para actas y solicitudes del contratista:
    - Borrador → Radicada → En revisión → Con observaciones → Aprobada interventoría → Avalada entidad → Pagada.
-4. **Otrosíes y modificaciones** (M2 9.1):
+4. ✅ **Otrosíes y modificaciones** (hecho: valor y plazo vigentes con historial y aviso de pólizas; faltan ítems no previstos con APU y cantidades por otrosí) (M2 9.1):
    - Adición de valor y prórroga, con historial versionado del valor y del plazo.
    - Ítems no previstos con APU.
    - Cantidad contratada vigente = original + otrosíes.
