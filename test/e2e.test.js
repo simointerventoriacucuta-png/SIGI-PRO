@@ -43,6 +43,10 @@ async function api(ruta, { metodo = 'GET', cuerpo, usuario = 1, esperado = 200 }
   assert.equal(r.status, esperado, `${metodo} /api/${ruta} → ${r.status} (se esperaba ${esperado}): ${texto.slice(0, 300)}`);
   try { return JSON.parse(texto); } catch { return texto; }
 }
+// Marca como "Cumple" la lista de chequeo documental del acta (requisito para aprobarla)
+async function cumplirChequeo(actaId) {
+  for (const f of (await api(`acta/${actaId}/chequeo`)).filas) await api(`acta/${actaId}/chequeo/${f.id}`, { metodo: 'PUT', cuerpo: { estado: 'Cumple' } });
+}
 const USU = { director: 1, residente: 2, especialista: 3, administrativo: 4, entidad: 5 };
 async function proyecto() {
   const pid = (await api('t/proyecto'))[0].id;
@@ -128,6 +132,8 @@ test('API: flujo de estados del acta y bloqueo', async () => {
   await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Inventado' }, esperado: 400 });
   for (const e of ['Radicada', 'En revisión', 'Con observaciones']) await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: e }, usuario: USU.residente });
   await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Aprobada interventoría' }, usuario: USU.residente, esperado: 403 });
+  await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Aprobada interventoría' }, esperado: 409 }); // falta la lista de chequeo
+  await cumplirChequeo(a.id);
   await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Aprobada interventoría' } });
   // Bloqueada
   await api(`acta/${a.id}/item/${it.id}`, { metodo: 'PUT', cuerpo: { cant_presentada: 1 }, esperado: 409 });
@@ -236,6 +242,7 @@ test('API: otrosí con cantidades por ítem (cantidad vigente) y bloqueo del pre
   await api(`acta/${a.id}/item/${it.id}`, { metodo: 'PUT', cuerpo: { cant_presentada: 12, cant_aprobada: 12 } });
   const f = (await api('acta/' + a.id)).filas.find(x => x.id === it.id);
   assert.equal(f.saldo, 3, 'el saldo usa la cantidad vigente');
+  await cumplirChequeo(a.id);
   await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Aprobada interventoría' } });
   await api('t/item/' + it.id, { metodo: 'PUT', cuerpo: { vr_unitario: 200 }, esperado: 409 });
   await api('t/item/' + it.id, { metodo: 'PUT', cuerpo: { descripcion: 'Ítem vigente (renombrado)' } });
@@ -294,6 +301,7 @@ test('API: captura de avance con foto (suma al acta, verificar, rechazar, borrar
   await api('t/avance/' + av2.id, { metodo: 'DELETE' });
   assert.equal(await pres(), 420);
   // Acta aprobada: la captura queda cerrada
+  await cumplirChequeo(a.id);
   await api('t/acta/' + a.id, { metodo: 'PUT', cuerpo: { estado: 'Aprobada interventoría' } });
   await api('t/avance/' + av.id, { metodo: 'PUT', cuerpo: { estado: 'Rechazado' }, esperado: 409 });
   await api('t/avance/' + av.id, { metodo: 'DELETE', esperado: 409 });
@@ -399,7 +407,7 @@ test('API: datos para Power BI (CSV y JSON), SST y PQRS', async () => {
   }
   await api('t/sst_mes/' + m.id, { metodo: 'DELETE' });
   const pq = await api('t/social', { metodo: 'POST', cuerpo: { proyecto_id: pid, tipo: 'PQRS', fecha: '2026-10-30' } });
-  assert.equal(pq.plazo, '2026-11-20', 'PQRS: 15 días hábiles');
+  assert.equal(pq.plazo, '2026-11-24', 'PQRS: 15 días hábiles sin festivos (2 y 16 de noviembre)');
   await api('t/social/' + pq.id, { metodo: 'DELETE' });
 });
 
@@ -474,7 +482,7 @@ test('Interfaz: director recorre cada pestaña y botón de la cinta y cada nodo 
         // Todo botón habilitado hace algo: abre una vista, un diálogo, un panel, una descarga o un aviso
         await cerrarDialogo(page);
         const msg = await page.textContent('#estado-mensaje');
-        assert.ok(!/^Error/.test(msg) || msg === msg0, `"${titulo}" (${c}) mostró: ${msg}`);
+        assert.ok(!/^Error/.test(msg) || msg === msg0 || /sin configurar/i.test(msg), `"${titulo}" (${c}) mostró: ${msg}`);
       }
     }
   }
@@ -547,6 +555,7 @@ test('Interfaz: presupuesto, tablas, gastos, otrosíes, suspensiones, liquidaci�
   // Tablas de registros: nueva fila, editar, adjuntar, borrar
   for (const t of ['vencimiento', 'correspondencia', 'bitacora', 'ensayo', 'personal', 'poliza', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social']) {
     await page.click(`#arbol [data-k="tabla:${t}"]`); await pausa(page);
+    if (await page.locator('#bit-tabla').count()) { await page.click('#bit-tabla'); await pausa(page); } // la bitácora abre como libreta
     const n0 = await page.locator('#g-tabla tbody tr[data-id]').count();
     await page.click('#t-nuevo'); await pausa(page);
     assert.equal(await page.locator('#g-tabla tbody tr[data-id]').count(), n0 + 1, 'no se creó la fila en ' + t);
@@ -673,6 +682,7 @@ test('Interfaz: acta (estados, bloqueo, Excel, Word), captura de avance con foto
   await page.click('#pestanas-cinta [data-c="obra"]');
   const wd = await descarga(page, () => page.click(boton('Acta en Word')));
   assert.match(wd.nombre, /^Acta_\d+\.docx$/); assert.ok(esZip(wd.buf));
+  await cumplirChequeo(actaId);
   for (const e of ['Radicada', 'En revisión', 'Aprobada interventoría']) { await page.click(`#pasos-acta [data-e="${e}"]`); await pausa(page, 500); }
   assert.ok(await page.isVisible('.candado'));
   assert.equal(await page.locator('#g-acta td.edit').count(), 0, 'el acta aprobada no debe tener celdas editables');
@@ -717,6 +727,38 @@ test('Interfaz: acta (estados, bloqueo, Excel, Word), captura de avance con foto
   assert.match(bi.buf.toString(), /numero/);
   await ctx.close();
   assert.deepEqual(errores.slice(antes), []);
+});
+
+test('Interfaz: vistas de ambiental, social y correo', async () => {
+  const antes = errores.length;
+  const { page, ctx } = await abrirApp(USU.director);
+  const nodos = await page.$$eval('#arbol [data-k^="tabla:"]', ns => ns.map(n => n.dataset.k.slice(6)));
+  const AMB = ['amb_ficha', 'amb_requisito', 'ambiental', 'amb_permiso', 'rcd', 'forestal', 'agua', 'maquinaria', 'monitoreo', 'amb_chequeo', 'pmt', 'pmt_inspeccion'];
+  const SOC = ['pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria', 'social'];
+  for (const t of [...AMB, ...SOC]) {
+    assert.ok(nodos.includes(t), 'falta el nodo ' + t + ' en el explorador');
+    await page.click(`#arbol [data-k="tabla:${t}"]`); await pausa(page);
+    assert.ok(!/^\s*Error/.test(await page.textContent('#contenido-doc')), 'la vista ' + t + ' muestra un error');
+    const n0 = await page.locator('#g-tabla tbody tr[data-id]').count();
+    await page.click('#t-nuevo'); await pausa(page);
+    assert.equal(await page.locator('#g-tabla tbody tr[data-id]').count(), n0 + 1, 'no se creó la fila en ' + t);
+    const id = await ultimoId(page, '#g-tabla');
+    await page.click(`#g-tabla [data-borrar="${id}"]`); await pausa(page);
+    assert.equal(await page.locator(`#g-tabla tr[data-id="${id}"]`).count(), 0, 'no se borró la fila en ' + t);
+  }
+  // Correo (Gmail): la configuración solo la ve el director; sin cuenta, revisar avisa sin romper nada
+  await cinta(page, 'inicio', 'Correo (Gmail)');
+  assert.ok(await page.isVisible('#co-correo'));
+  await cerrarDialogo(page);
+  await cinta(page, 'inicio', 'Revisar ahora');
+  assert.match(await page.textContent('#estado-mensaje'), /Gmail|correo/i);
+  await ctx.close();
+  assert.deepEqual(errores.slice(antes), []);
+  const cfg = await api('correo/config');
+  assert.ok(!/"(clave|password|contrasena)":"[^"]+"/i.test(JSON.stringify(cfg)), 'la configuración no debe devolver la contraseña');
+  await api('correo/config', { usuario: USU.entidad, esperado: 403 });
+  await api('correo/revisar', { metodo: 'POST', usuario: USU.residente, esperado: 403 });
+  await api('correo/estado');
 });
 
 test('Interfaz: rol de solo consulta (entidad) recibe 403 sin romper la página', async () => {

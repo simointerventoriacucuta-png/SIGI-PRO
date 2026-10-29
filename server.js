@@ -455,12 +455,13 @@ async function validarEstado(u, antes, d) {
       throw new Rechazo(409, `El acta ${antes.numero} está "${antes.estado}" y no se puede editar`);
     if (ESTADOS_ACTA.indexOf(d.estado) < BLOQUEO && u.rol !== 'director') throw new Rechazo(403, 'Solo el director puede reabrir un acta aprobada');
   }
+  // Primero el permiso del rol (403) y después la lista de chequeo (409)
+  if (d.estado != null && d.estado !== antes?.estado && QUIEN_ESTADO[d.estado] && !QUIEN_ESTADO[d.estado].includes(u.rol))
+    throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
   if (antes && d.estado != null && ESTADOS_ACTA.indexOf(d.estado) >= BLOQUEO && !bloqueada(antes)) {
     const ch = await chequeo(antes.id);
     if (!ch.completo) throw new Rechazo(409, `Faltan ${ch.faltan} requisitos obligatorios de la lista de chequeo documental para aprobar el acta`);
   }
-  if (d.estado != null && d.estado !== antes?.estado && QUIEN_ESTADO[d.estado] && !QUIEN_ESTADO[d.estado].includes(u.rol))
-    throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
 }
 
 // ---------- Asistente (Gemini por defecto, Ollama local o Claude) ----------
