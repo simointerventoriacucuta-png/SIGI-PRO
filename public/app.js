@@ -82,7 +82,7 @@ const ab = (tipo, vista) => () => abrir(vista + ':' + contrato(tipo)?.id);
 const CINTA = {
   inicio: ['Inicio', [
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
-    ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
+    ['Seguimiento', [['Calendario', 'vencimiento', () => abrir('calendario')], ['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
     ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente ✦', 'asistente', abrirAsistente], ['Clave del asistente', 'nube', configurarAsistente]]],
     ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
@@ -161,7 +161,7 @@ function pintarArbol() {
   if (!E.res) return;
   const r = E.res, ob = contrato('obra'), it = contrato('interventoria');
   const n = (clave, texto, nivel = 0, cuenta = '', carpeta = false) => `<div class="nodo ${carpeta ? 'carpeta' : ''} ${E.activo === clave ? 'activo' : ''}" style="--nivel:${nivel}" ${clave ? `data-k="${clave}"` : ''}>${texto}<span class="cuenta">${cuenta}</span></div>`;
-  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI') + n('fotos', '📷 Registro fotográfico');
+  let h = n('tablero', '📊 Tablero') + n('calendario', '📅 Calendario') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI') + n('fotos', '📷 Registro fotográfico');
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
     h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length) + n('suspensiones:' + ob.id, '⏸️ Suspensiones', 0, ob.suspendido ? 'suspendido' : ob.suspensiones.length) + n('liquidacion:' + ob.id, '🏁 Liquidación', 0, ob.liquidacion?.estado || '');
@@ -192,7 +192,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance',
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', calendario: 'Calendario', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance',
     suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
@@ -202,6 +202,7 @@ function cintaDe(k) {
   if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
+  if (t === 'calendario') return 'inicio';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
   return E.res?.contratos.find(c => String(c.id) === x)?.tipo;
 }
@@ -232,7 +233,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, calendario: vCalendario, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
     await vista(cont, x);
     marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
@@ -269,7 +270,9 @@ async function vTablero(cont) {
   const avOb = ob?.presupuesto ? ob.ejecutado / ob.presupuesto : 0, avIt = it?.presupuesto ? it.ejecutado / it.presupuesto : 0;
   const pGas = it?.costo_directo ? it.gastado / it.costo_directo : 0;
   const prox = r.vencimientos.filter(v => v.fecha).slice(0, 6);
+  const est = await estadoContrato(r);
   cont.innerHTML = `<h2>${esc(r.proyecto.nombre)}</h2><p class="sub">${esc(r.proyecto.objeto || '')}</p>
+  ${est}
   <div class="seccion obra">EJECUCIÓN DE OBRA · ${esc(ob?.contratista || 'contratista')}</div>
   <div class="tarjetas">
     ${tarj('Presupuesto de obra', ob?.presupuesto ? pesos(ob.presupuesto) : 'Sin precios', ob ? ob.items + ' ítems · AIU ' + fmt(ob.aiu_a, 0) + '/' + fmt(ob.aiu_i, 0) + '/' + fmt(ob.aiu_u, 0) : '')}
@@ -285,11 +288,70 @@ async function vTablero(cont) {
     ${tarj('Utilidad a la fecha', pesos((it?.ejecutado || 0) - (it?.gastado || 0)), 'Facturado − gastado (antes de impuestos)')}
   </div>
   <div class="dos-col">
-    <div class="caja"><h3>Próximos vencimientos</h3>${prox.length ? `<table class="grilla"><tbody>${prox.map(v => { const d = dias(v.fecha);
+    <div class="caja"><h3>Próximos vencimientos <button class="btn" data-abrir="calendario" style="float:right">📅 Ver calendario</button></h3>${prox.length ? `<table class="grilla"><tbody>${prox.map(v => { const d = dias(v.fecha);
       return `<tr><td>${fechaLarga(v.fecha)}</td><td class="${d < 0 || d <= 3 ? 'malo' : ''}">${d < 0 ? 'Vencido hace ' + -d + ' d' : d === 0 ? 'Hoy' : 'En ' + d + ' d'}</td><td>${esc(v.descripcion)}</td></tr>`; }).join('')}</tbody></table>` : '<p class="sub">No hay vencimientos con fecha.</p>'}
       <p class="sub">${r.vencimientos.filter(v => !v.fecha).length} pendientes sin fecha · ver panel derecho</p></div>
     <div class="caja"><h3>Avance del contrato de obra por acta</h3>${curva(ob)}</div>
   </div>`;
+  cont.querySelectorAll('[data-abrir]').forEach(tr => tr.addEventListener('click', () => abrir(tr.dataset.abrir)));
+}
+// ---------- Estado del contrato de un vistazo (indicadores) ----------
+const SEM = { verde: 'Al día', amarillo: 'Atención', rojo: 'Crítico', gris: 'Sin datos' };
+const luz = s => `<span class="luz ${s}" title="${SEM[s]}"></span>`;
+const mesCorto = m => ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][+m.slice(5, 7) - 1] + ' ' + m.slice(2, 4);
+async function estadoContrato(r) {
+  let d; try { d = await api('indicadores/' + E.pid); } catch { return ''; }
+  const e = d.evm, p = d.plazo, f1 = v => (v == null ? '—' : fmt(v, 1) + ' %'), f2 = v => (v == null ? '—' : fmt(v, 2));
+  const spiV = e.spi ?? e.spi_programa;
+  const barraP = (et, v, c) => `<div class="fila-barra"><span>${et}</span><div><i style="width:${Math.min(100, v || 0)}%;background:${c}"></i></div><b>${f1(v)}</b></div>`;
+  const tarjS = (et, v, s, no) => `<div class="tarjeta sem-${s}"><div class="et">${et}</div><div class="va">${luz(s)} ${f2(v)}</div><div class="no">${no}</div></div>`;
+  const lista = (filas, vacio) => (filas.length ? `<table class="grilla"><tbody>${filas.join('')}</tbody></table>` : `<p class="sub">${vacio}</p>`);
+  const sst = d.sst;
+  return `<div class="seccion obra">ESTADO DEL CONTRATO DE OBRA · corte ${fechaLarga(d.hoy)}</div>
+  <div class="tarjetas">
+    ${tarjS('SPI · cumplimiento del programa', spiV, e.semaforo_spi, e.spi != null ? `EV / PV = actas ${pesos(e.ev)} / programado ${pesos(e.pv)}` : e.spi_programa != null ? 'Avance real / programado (Project)' : 'Importe el programa de Project para calcularlo')}
+    ${tarjS('CPI · físico vs facturado', e.cpi, e.semaforo_cpi, e.cpi != null ? `EV físico ${pesos(e.ev_fisico)} / facturado ${pesos(e.ac)}` : 'Requiere programa con avance real y actas')}
+    <div class="tarjeta"><div class="et">Plazo vigente</div><div class="va">${p.dias_total ? p.dias_restantes + ' d restantes' : '—'}</div><div class="no">${p.dias_total ? `${p.dias_transcurridos} de ${p.dias_total} días · termina ${fechaLarga(p.fin)}` : 'Sin acta de inicio o terminación'}${p.suspendido ? ' · <b class="malo">SUSPENDIDO</b>' : ''}</div></div>
+    <div class="tarjeta"><div class="et">Variación del cronograma (SV)</div><div class="va ${e.sv == null ? '' : e.sv < 0 ? 'malo' : 'bueno'}">${e.sv == null ? '—' : pesos(e.sv)}</div><div class="no">EV − PV · negativo = atraso</div></div>
+  </div>
+  <div class="dos-col">
+    <div class="caja"><h3>Curva S · programado vs ejecutado</h3>${curvaS(d.curva, e)}</div>
+    <div class="caja"><h3>Tiempo, avance físico y financiero</h3><div class="barras">
+      ${barraP('Plazo transcurrido', p.pct_tiempo, '#90a4ae')}${barraP('Programado (Project)', e.programado_pct, '#b26a00')}${barraP('Físico real (Project)', p.pct_fisico, 'var(--verde)')}${barraP('Financiero (actas)', p.pct_financiero, 'var(--azul)')}</div>
+      <p class="sub">${p.pct_tiempo != null && p.pct_financiero != null ? (p.pct_financiero + 10 < p.pct_tiempo ? '⚠ El avance financiero va más de 10 puntos por debajo del tiempo transcurrido.' : 'El avance financiero acompaña el tiempo transcurrido.') : 'Faltan fechas o valor para comparar.'}
+      ${p.pct_fisico != null && p.pct_financiero != null && p.pct_financiero > p.pct_fisico + 5 ? ' ⚠ Se ha facturado más de lo ejecutado físicamente.' : ''}</p>
+      <h3>Por capítulo</h3>${barras(d.capitulos.map(c => ({ n: c.capitulo, v: c.pct || 0 })), v => fmt(v, 1) + ' %')}</div>
+  </div>
+  <div class="tres-col">
+    <div class="caja"><h3>Alertas (${d.alertas.length})</h3>${lista(d.alertas.slice(0, 8).map(a => { const x = dias(a.fecha); return `<tr data-abrir="${esc(a.abrir)}" class="clic"><td class="${x != null && x <= 0 ? 'malo' : ''}">${fechaLarga(a.fecha)}</td><td>${esc(a.tipo)}</td><td>${esc(a.texto)}</td></tr>`; }), 'Sin alertas en los próximos 7 días.')}</div>
+    <div class="caja"><h3>Pólizas por vencer (30 días)</h3>${lista(d.polizas.map(x => { const y = dias(x.hasta); return `<tr data-abrir="tabla:poliza" class="clic"><td class="${y < 0 ? 'malo' : y <= 15 ? 'malo' : ''}">${y < 0 ? 'Vencida' : 'En ' + y + ' d'}</td><td>${esc(x.amparo || '')}</td><td>${esc(x.contrato || '')} ${esc(x.numero || '')}</td></tr>`; }), 'Ninguna póliza vence en los próximos 30 días.')}</div>
+    <div class="caja"><h3>PQRS</h3><div class="va-grande ${d.pqrs.vencidas ? 'malo' : ''}">${d.pqrs.abiertas} abiertas</div><p class="sub">${d.pqrs.vencidas} vencidas · ${d.pqrs.total} en total · plazo 15 días hábiles (Ley 1755 de 2015)</p>
+      ${lista(d.pqrs.lista.map(s => `<tr data-abrir="tabla:social" class="clic"><td>${fechaLarga(s.fecha)}</td><td>${esc(s.descripcion || '')}</td><td class="${s.plazo && s.plazo < d.hoy ? 'malo' : ''}">${s.plazo ? fechaLarga(s.plazo) : ''}</td></tr>`), '')}</div>
+    <div class="caja"><h3>SST ${sst ? '· ' + sst.mes : ''}</h3>${sst ? `<table class="grilla"><tbody>
+      <tr><td>Trabajadores</td><td class="num">${sst.trabajadores || 0}</td></tr><tr><td>Frecuencia de accidentalidad</td><td class="num ${sst.frecuencia > 0 ? 'malo' : 'bueno'}">${fmt(sst.frecuencia, 2)}</td></tr>
+      <tr><td>Severidad</td><td class="num">${fmt(sst.severidad, 2)}</td></tr><tr><td>Mortalidad</td><td class="num ${sst.mortalidad > 0 ? 'malo' : ''}">${fmt(sst.mortalidad, 2)}</td></tr>
+      <tr><td>Ausentismo (%)</td><td class="num">${fmt(sst.ausentismo, 2)}</td></tr><tr><td>Planillas PILA/ARL</td><td class="${sst.planillas_ok === 'Sí' ? 'bueno' : 'malo'}">${esc(sst.planillas_ok || '')}</td></tr></tbody></table>
+      <p class="sub">Res. 0312 de 2019 · por cada 100 trabajadores</p>` : '<p class="sub">Sin indicadores SST registrados.</p>'}</div>
+    <div class="caja"><h3>Capturas de avance · últimos 7 días (${d.capturas.length})</h3>
+      ${d.fotos.length ? `<div class="miniaturas">${d.fotos.map(f => `<img src="/api/adjunto/${f.id}/archivo" alt="${esc(f.descripcion || f.nombre || '')}" title="${esc((f.fecha || '') + ' ' + (f.descripcion || ''))}" loading="lazy">`).join('')}</div>` : ''}
+      ${lista(d.capturas.slice(0, 6).map(c => `<tr data-abrir="avances" class="clic"><td>${fechaLarga(c.fecha)}</td><td>${esc(c.codigo || '')} ${esc(c.frente || '')}</td><td class="num">${fmt(c.cantidad, 2)} ${esc(c.unidad || '')}</td></tr>`), 'Sin capturas de campo esta semana.')}</div>
+  </div>`;
+}
+// Curva S mensual en SVG: programado (Project), ejecutado por actas y avance real del programa a hoy; barras = valor de actas del mes
+function curvaS(c, e) {
+  if (!c.length) return '<p class="sub">Registre las fechas del contrato de obra, el programa de Project o las actas para ver la curva S.</p>';
+  const W = 560, H = 230, m = 36, n = c.length, x = i => m + (i + 0.5) * (W - m - 12) / n, y = v => H - 22 - Math.min(100, v) / 100 * (H - 44);
+  const maxMes = Math.max(1, ...c.map(k => k.valor_actas_mes)), bw = Math.max(2, Math.min(18, (W - m) / n - 3));
+  const linea = (k, col, dash = '') => { const pts = c.map((v, i) => (v[k] == null ? null : `${x(i)},${y(v[k])}`)); const seg = pts.filter(Boolean); return seg.length ? `<polyline points="${seg.join(' ')}" fill="none" stroke="${col}" stroke-width="2" ${dash}/>` : ''; };
+  const paso = Math.ceil(n / 8), iHoy = c.findIndex(k => k.mes === hoyISO().slice(0, 7));
+  const ejes = [0, 25, 50, 75, 100].map(v => `<line x1="${m}" x2="${W - 12}" y1="${y(v)}" y2="${y(v)}" stroke="#eee"/><text x="${m - 4}" y="${y(v) + 3}" text-anchor="end">${v}%</text>`).join('');
+  const barrasM = c.map((k, i) => (k.valor_actas_mes ? `<rect x="${x(i) - bw / 2}" y="${H - 22 - k.valor_actas_mes / maxMes * 50}" width="${bw}" height="${k.valor_actas_mes / maxMes * 50}" fill="#9db8da"><title>${mesCorto(k.mes)}: ${pesos(k.valor_actas_mes)}</title></rect>` : '')).join('');
+  const etiq = c.map((k, i) => (i % paso === 0 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${mesCorto(k.mes)}</text>` : '')).join('');
+  const puntos = c.map((k, i) => (k.ejecutado_actas_pct != null ? `<circle cx="${x(i)}" cy="${y(k.ejecutado_actas_pct)}" r="2.5" fill="#1f5fa8"><title>${mesCorto(k.mes)} · ejecutado ${fmt(k.ejecutado_actas_pct, 1)} %${k.programado_pct != null ? ' · programado ' + fmt(k.programado_pct, 1) + ' %' : ''}</title></circle>` : '')).join('');
+  const real = iHoy >= 0 && e.real_pct != null ? `<rect x="${x(iHoy) - 4}" y="${y(e.real_pct) - 4}" width="8" height="8" fill="#2e7d32" transform="rotate(45 ${x(iHoy)} ${y(e.real_pct)})"><title>Avance real del programa: ${fmt(e.real_pct, 1)} %</title></rect>` : '';
+  const hoyL = iHoy >= 0 ? `<line x1="${x(iHoy)}" x2="${x(iHoy)}" y1="${y(100)}" y2="${H - 22}" stroke="#c62828" stroke-dasharray="3"/><text x="${x(iHoy) + 3}" y="${y(100) + 9}" fill="#c62828">hoy</text>` : '';
+  return `<svg class="curva" viewBox="0 0 ${W} ${H}" role="img" aria-label="Curva S">${ejes}${barrasM}${hoyL}${linea('programado_pct', '#b26a00', 'stroke-dasharray="5 3"')}${linea('ejecutado_actas_pct', '#1f5fa8')}${puntos}${real}${etiq}</svg>
+  <p class="sub leyenda"><i style="background:#b26a00"></i>Programado (Project) <i style="background:#1f5fa8"></i>Ejecutado por actas <i style="background:#2e7d32"></i>Real del programa a hoy <i style="background:#9db8da"></i>Valor de actas del mes</p>`;
 }
 function curva(c) {
   if (!c || !c.actas.length) return '<p class="sub">Aún no hay actas de obra.</p>';
@@ -644,22 +706,91 @@ function barras(datos, formato = pesos) {
   const max = Math.max(1, ...datos.map(d => Math.abs(d.v)));
   return `<div class="barras">${datos.map(d => `<div class="fila-barra"><span>${esc(d.n)}</span><div><i style="width:${(Math.abs(d.v) / max) * 100}%;background:${d.c || 'var(--azul)'}"></i></div><b>${formato(d.v)}</b></div>`).join('') || '<p class="sub">Sin datos</p>'}</div>`;
 }
+// Columnas agrupadas en SVG: etiquetas + series [{ n, c, v: [] }]
+function columnas(etq, series, formato = pesos) {
+  if (!etq.length || !series.some(s => s.v.some(Boolean))) return '<p class="sub">Sin datos</p>';
+  const W = 560, H = 200, m = 8, n = etq.length, k = series.length, max = Math.max(1, ...series.flatMap(s => s.v.map(v => v || 0)));
+  const ancho = (W - 2 * m) / n, bw = Math.max(2, Math.min(20, (ancho - 4) / k)), y = v => H - 22 - (v || 0) / max * (H - 40), paso = Math.ceil(n / 8);
+  const rects = etq.map((e, i) => series.map((s, j) => (s.v[i] ? `<rect x="${m + i * ancho + (ancho - bw * k) / 2 + j * bw}" y="${y(s.v[i])}" width="${bw - 1}" height="${H - 22 - y(s.v[i])}" fill="${s.c}"><title>${esc(e)} · ${esc(s.n)}: ${formato(s.v[i])}</title></rect>` : '')).join('')
+    + (i % paso === 0 ? `<text x="${m + i * ancho + ancho / 2}" y="${H - 6}" text-anchor="middle">${esc(e)}</text>` : '')).join('');
+  return `<svg class="columnas" viewBox="0 0 ${W} ${H}"><text x="${m}" y="10">Máx. ${formato(max)}</text><line x1="${m}" x2="${W - m}" y1="${H - 22}" y2="${H - 22}" stroke="#ccc"/>${rects}</svg>
+  <p class="sub leyenda">${series.map(s => `<i style="background:${s.c}"></i>${esc(s.n)}`).join(' ')}</p>`;
+}
 async function vGraficos(cont) {
   const ob = contrato('obra'), it = contrato('interventoria');
-  const [prog, ind] = await Promise.all([api('programa/' + E.pid), api('sst-indicadores/' + E.pid)]);
+  const vacio = { evm: {}, curva: [], capitulos: [], sst_meses: [], capturas_mes: [] };
+  const [prog, d] = await Promise.all([api('programa/' + E.pid).catch(() => ({})), api('indicadores/' + E.pid).catch(() => vacio)]);
   const base = location.origin + '/api/bi/' + E.pid + '/';
-  const conjuntos = ['contratos', 'actas', 'items', 'gastos', 'programa', 'tramos', 'sst', 'sst_indicadores', 'ambiental', 'pmt', 'social'];
+  const conjuntos = [['contratos', 'Contratos y valores vigentes'], ['actas', 'Actas y cuentas de cobro'], ['items', 'Ítems con acumulado y saldo'], ['capitulos', 'Avance por capítulo'], ['curva_s', 'Curva S mensual (PV, EV, % programado y ejecutado)'],
+    ['valor_ganado', 'Valor ganado a hoy: SPI, CPI, plazo'], ['gastos', 'Gastos de interventoría'], ['programa', 'Programa de obra (Project)'], ['tramos', 'Tramos'], ['capturas_mes', 'Capturas de avance por mes'],
+    ['polizas', 'Pólizas'], ['alertas', 'Alertas de 7 días'], ['sst', 'SST'], ['sst_indicadores', 'Indicadores SST por mes'], ['ambiental', 'Ambiental'], ['pmt', 'PMT'], ['social', 'Social y PQRS']];
+  const meses = d.curva.filter(k => k.valor_actas_mes || k.valor_interventoria_mes);
   cont.innerHTML = `<h2>Gráficos y datos para Power BI</h2>
   <div class="dos-col">
-    <div><h3 class="h3">Valor por acta de obra</h3>${barras((ob?.actas || []).map(a => ({ n: 'Acta ' + a.numero, v: a.valor })))}</div>
-    <div><h3 class="h3">Cuentas de cobro de interventoría</h3>${barras((it?.actas || []).map(a => ({ n: 'Cuenta ' + a.numero, v: a.valor, c: '#2e7d32' })))}</div>
-    <div><h3 class="h3">Ejecución de los contratos</h3>${barras([ob && { n: 'Obra ejecutado', v: ob.ejecutado }, ob && { n: 'Obra vigente', v: ob.valor_vigente, c: '#90a4ae' }, it && { n: 'Interv. facturado', v: it.ejecutado, c: '#2e7d32' }, it && { n: 'Interv. gastado', v: it.gastado, c: '#b26a00' }, it && { n: 'Interv. vigente', v: it.valor_vigente, c: '#90a4ae' }].filter(Boolean))}</div>
-    <div><h3 class="h3">Programa de obra</h3>${barras([{ n: 'Programado', v: prog.programado, c: '#90a4ae' }, { n: 'Ejecutado', v: prog.real }], v => fmt(v, 1) + ' %')}</div>
-    <div><h3 class="h3">SST · frecuencia de accidentalidad</h3>${barras(ind.map(m => ({ n: m.mes, v: m.frecuencia || 0, c: '#c62828' })), v => fmt(v, 2))}</div>
+    <div class="caja"><h3>Curva S del contrato de obra</h3>${curvaS(d.curva, d.evm)}</div>
+    <div class="caja"><h3>Valor facturado por mes</h3>${columnas(meses.map(k => mesCorto(k.mes)), [{ n: 'Actas de obra', c: '#1f5fa8', v: meses.map(k => k.valor_actas_mes) }, { n: 'Cuentas de interventoría', c: '#2e7d32', v: meses.map(k => k.valor_interventoria_mes) }])}</div>
+    <div class="caja"><h3>Contratado vs ejecutado por capítulo (costo directo)</h3>${columnas(d.capitulos.map(c => c.capitulo.slice(0, 14)), [{ n: 'Contratado', c: '#90a4ae', v: d.capitulos.map(c => c.contratado) }, { n: 'Ejecutado', c: '#1f5fa8', v: d.capitulos.map(c => c.ejecutado) }])}
+      ${barras(d.capitulos.map(c => ({ n: c.capitulo, v: c.pct || 0 })), v => fmt(v, 1) + ' %')}</div>
+    <div class="caja"><h3>Ejecución de los contratos</h3>${barras([ob && { n: 'Obra ejecutado', v: ob.ejecutado }, ob && { n: 'Obra vigente', v: ob.valor_vigente, c: '#90a4ae' }, it && { n: 'Interv. facturado', v: it.ejecutado, c: '#2e7d32' }, it && { n: 'Interv. gastado', v: it.gastado, c: '#b26a00' }, it && { n: 'Interv. vigente', v: it.valor_vigente, c: '#90a4ae' }].filter(Boolean))}
+      <h3>Programa de obra</h3>${barras([{ n: 'Programado', v: prog.programado || 0, c: '#90a4ae' }, { n: 'Ejecutado', v: prog.real || 0 }], v => fmt(v, 1) + ' %')}</div>
+    <div class="caja"><h3>Valor por acta de obra</h3>${barras((ob?.actas || []).map(a => ({ n: 'Acta ' + a.numero, v: a.valor })))}
+      <h3>Cuentas de cobro de interventoría</h3>${barras((it?.actas || []).map(a => ({ n: 'Cuenta ' + a.numero, v: a.valor, c: '#2e7d32' })))}</div>
+    <div class="caja"><h3>Capturas de avance en campo por mes</h3>${columnas(d.capturas_mes.map(k => mesCorto(k.mes)), [{ n: 'Capturas', c: '#b26a00', v: d.capturas_mes.map(k => k.capturas) }], v => fmt(v, 0))}</div>
+    <div class="caja"><h3>SST · frecuencia y severidad por mes</h3>${columnas(d.sst_meses.map(m => mesCorto(m.mes)), [{ n: 'Frecuencia', c: '#c62828', v: d.sst_meses.map(m => m.frecuencia) }, { n: 'Severidad', c: '#b26a00', v: d.sst_meses.map(m => m.severidad) }], v => fmt(v, 2))}</div>
   </div>
   <h3 class="h3" style="margin-top:18px">Conectar Power BI</h3>
-  <p class="sub">En Power BI Desktop: <b>Obtener datos → Web</b>, pegue una de estas direcciones y pulse Aceptar. Con SIGI Pro abierto, <b>Actualizar</b> trae los datos al día. Para tableros compartidos en la nube, active la sincronización con Turso o exporte el CSV.</p>
-  <table class="grilla" style="max-width:900px"><tbody>${conjuntos.map(c => `<tr><td>${c}</td><td><code>${esc(base + c + '.csv')}</code></td><td><a href="${base + c}.csv">Descargar CSV</a></td></tr>`).join('')}</tbody></table>`;
+  <p class="sub">En Power BI Desktop: <b>Obtener datos → Web</b>, pegue una de estas direcciones y pulse Aceptar. Con SIGI Pro abierto, <b>Actualizar</b> trae los datos al día. Cambie <code>.csv</code> por <code>.json</code> si lo prefiere. Para tableros compartidos en la nube, active la sincronización con Turso o exporte el CSV.</p>
+  <table class="grilla" style="max-width:1000px"><tbody>${conjuntos.map(([c, t]) => `<tr><td>${c}</td><td>${t}</td><td><code>${esc(base + c + '.csv')}</code></td><td><a href="${base + c}.csv">Descargar CSV</a></td></tr>`).join('')}</tbody></table>`;
+}
+
+// ---------- Calendario del proyecto ----------
+const TIPOS_CAL = { Vencimiento: '#c62828', Póliza: '#6a1b9a', PQRS: '#d84315', Correspondencia: '#00838f', PMT: '#f9a825', Acta: '#1f5fa8', Contrato: '#174a85', Otrosí: '#5d4037',
+  Suspensión: '#455a64', Liquidación: '#880e4f', Social: '#ef6c00', Bitácora: '#6d4c41', Captura: '#2e7d32', Programa: '#b26a00', Ensayo: '#0277bd', SST: '#ad1457', Ambiental: '#558b2f' };
+const isoL = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const lunes = d => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+async function vCalendario(cont) {
+  const C = E.cal = E.cal || { modo: 'mes', ref: hoyISO(), ocultos: [] };
+  const ref = new Date(C.ref + 'T00:00:00');
+  let ini, fin, titulo;
+  if (C.modo === 'semana') { ini = lunes(ref); fin = new Date(ini); fin.setDate(fin.getDate() + 6); titulo = `Semana del ${fechaLarga(isoL(ini))}`; }
+  else if (C.modo === 'agenda') { ini = new Date(ref); fin = new Date(ref); fin.setDate(fin.getDate() + 59); titulo = `Agenda · ${fechaLarga(isoL(ini))} a ${fechaLarga(isoL(fin))}`; }
+  else { const p = new Date(ref.getFullYear(), ref.getMonth(), 1); ini = lunes(p); fin = new Date(ini); fin.setDate(fin.getDate() + 41); titulo = p.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }); titulo = titulo[0].toUpperCase() + titulo.slice(1); }
+  let ev = [];
+  try { ev = await api(`calendario/${E.pid}?desde=${isoL(ini)}&hasta=${isoL(fin)}`); } catch (e) { aviso('Error: ' + e.message); }
+  const vis = ev.filter(e => !C.ocultos.includes(e.tipo)), hoy = hoyISO(), porDia = {};
+  for (const e of vis) (porDia[e.fecha] = porDia[e.fecha] || []).push(e);
+  const chip = e => `<div class="ev ${e.vencido ? 'vencido' : ''}" data-abrir="${esc(e.abrir)}" style="--c:${TIPOS_CAL[e.tipo] || '#777'}" title="${esc(e.tipo + ': ' + e.titulo + (e.vencido ? ' (vencido)' : ''))}">${esc(e.titulo)}</div>`;
+  const dia = (d, max) => { const f = isoL(d), l = porDia[f] || [], otro = C.modo === 'mes' && d.getMonth() !== ref.getMonth();
+    return `<div class="dia ${f === hoy ? 'hoy' : ''} ${otro ? 'otro' : ''}" data-dia="${f}"><div class="num-dia">${C.modo === 'semana' ? d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' }) : d.getDate()}</div>${l.slice(0, max).map(chip).join('')}${l.length > max ? `<div class="mas" data-mas="${f}">+${l.length - max} más</div>` : ''}</div>`; };
+  const dias = n => Array.from({ length: n }, (_, i) => { const d = new Date(ini); d.setDate(d.getDate() + i); return d; });
+  const cab = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map(x => `<div class="cab-dia">${x}</div>`).join('');
+  const cuerpo = C.modo === 'agenda'
+    ? (Object.keys(porDia).sort().map(f => `<div class="agenda-dia ${f === hoy ? 'hoy' : ''}"><b>${new Date(f + 'T00:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</b>${porDia[f].map(e => `<div class="fila-ag" data-abrir="${esc(e.abrir)}"><span class="pt" style="background:${TIPOS_CAL[e.tipo]}"></span><span class="tipo">${esc(e.tipo)}</span><span class="${e.vencido ? 'malo' : ''}">${esc(e.titulo)}${e.vencido ? ' · vencido' : ''}</span></div>`).join('')}</div>`).join('') || '<p class="sub">No hay eventos en los próximos 60 días.</p>')
+    : `<div class="cal-grilla ${C.modo}">${cab}${dias(C.modo === 'semana' ? 7 : 42).map(d => dia(d, C.modo === 'semana' ? 40 : 3)).join('')}</div>`;
+  const cuenta = t => ev.filter(e => e.tipo === t).length;
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Calendario del proyecto</h2><span class="esp"></span>
+    <button class="btn" data-mover="-1">◀</button><button class="btn" data-mover="0">Hoy</button><button class="btn" data-mover="1">▶</button>
+    ${['mes', 'semana', 'agenda'].map(m => `<button class="btn ${C.modo === m ? 'prim' : ''}" data-modo="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}
+    <a class="btn" href="/api/calendario/${E.pid}/ics" download title="Para Google Calendar, Outlook o el calendario del celular">📅 Exportar .ics</a></div>
+  <h3 class="cal-titulo">${esc(titulo)} <span class="sub">· ${vis.length} eventos${ev.some(e => e.vencido) ? ` · <b class="malo">${ev.filter(e => e.vencido).length} vencidos</b>` : ''}</span></h3>
+  <div class="cal-leyenda">${Object.keys(TIPOS_CAL).map(t => `<label><input type="checkbox" data-tipo="${t}" ${C.ocultos.includes(t) ? '' : 'checked'}><i style="background:${TIPOS_CAL[t]}"></i>${t}${cuenta(t) ? ` (${cuenta(t)})` : ''}</label>`).join('')}</div>
+  ${cuerpo}
+  <p class="sub">Clic en un evento para abrir su documento · clic en un día libre para crear un vencimiento · los pendientes con fecha pasada salen en rojo.</p>`;
+  cont.onclick = async e => {
+    const a = e.target.closest('[data-abrir]'); if (a) return abrir(a.dataset.abrir);
+    const m = e.target.closest('[data-mover]');
+    if (m) { const k = +m.dataset.mover, d = new Date(C.ref + 'T00:00:00');
+      if (!k) C.ref = hoyISO(); else { if (C.modo === 'mes') d.setMonth(d.getMonth() + k, 1); else d.setDate(d.getDate() + k * (C.modo === 'semana' ? 7 : 60)); C.ref = isoL(d); }
+      return vCalendario(cont); }
+    const mo = e.target.closest('[data-modo]'); if (mo) { C.modo = mo.dataset.modo; return vCalendario(cont); }
+    const mas = e.target.closest('[data-mas]'); if (mas) { C.modo = 'semana'; C.ref = mas.dataset.mas; return vCalendario(cont); }
+    const d = e.target.closest('[data-dia]');
+    if (d && !e.target.closest('.ev')) {
+      const t = prompt(`Nuevo vencimiento para el ${fechaLarga(d.dataset.dia)}:`); if (!t || !t.trim()) return;
+      try { await api('t/vencimiento', 'POST', { proyecto_id: E.pid, fecha: d.dataset.dia, descripcion: t.trim(), tipo: 'Recordatorio', estado: 'Pendiente' }); aviso('Vencimiento creado'); refrescarSilencioso(); vCalendario(cont); } catch (er) { aviso('Error: ' + er.message); }
+    }
+  };
+  cont.querySelectorAll('[data-tipo]').forEach(c => c.onchange = () => { C.ocultos = c.checked ? C.ocultos.filter(x => x !== c.dataset.tipo) : [...C.ocultos, c.dataset.tipo]; vCalendario(cont); });
 }
 
 // ---------- Suspensiones y reinicios ----------
