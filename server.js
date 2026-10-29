@@ -16,7 +16,7 @@ const db = new Base(DATOS);
 
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
-  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', gasto: 'contrato_id',
+  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', otrosi_item: 'otrosi_id', gasto: 'contrato_id',
   suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
@@ -29,7 +29,8 @@ const HIJOS = {
   alineamiento: [['tramo', 'alineamiento_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id'], ['suspension', 'contrato_id'], ['liquidacion', 'contrato_id']],
   acta: [['acta_item', 'acta_id']],
-  item: [['item', 'padre_id'], ['acta_item', 'item_id']],
+  otrosi: [['otrosi_item', 'otrosi_id']],
+  item: [['item', 'padre_id'], ['acta_item', 'item_id'], ['otrosi_item', 'item_id']],
 };
 const columnas = {};
 
@@ -40,7 +41,7 @@ const PERMISOS = {
   director: '*',
   residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
   especialista: ['acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  administrativo: ['otrosi', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
+  administrativo: ['otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
 const puede = (u, recurso) => !!u && (PERMISOS[u.rol] === '*' || (PERMISOS[u.rol] || []).includes(recurso));
@@ -78,10 +79,18 @@ async function actaEditable(actaId) {
   return a;
 }
 
+// El precio de un ítem ya pagado en un acta aprobada no puede cambiar (cambiaría el valor del acta cerrada)
+async function precioLibre(itemId) {
+  const a = (await db.all('SELECT a.numero, a.estado FROM acta_item ai JOIN acta a ON a.id = ai.acta_id WHERE ai.item_id = ? AND ai.cant_aprobada <> 0', itemId)).find(bloqueada);
+  if (a) throw new Rechazo(409, `El ítem está en el acta ${a.numero} "${a.estado}": su valor unitario no se puede cambiar`);
+}
+
 async function iniciar() {
   await db.abrir();
   await db.exec(ESQUEMA);
   if (!(await db.all('PRAGMA table_info(usuario)')).some(c => c.name === 'correo')) await db.run('ALTER TABLE usuario ADD COLUMN correo TEXT');
+  const colItem = (await db.all('PRAGMA table_info(item)')).map(c => c.name);
+  for (const [c, t] of [['otrosi_id', 'INTEGER'], ['apu', 'TEXT']]) if (!colItem.includes(c)) await db.run(`ALTER TABLE item ADD COLUMN ${c} ${t}`);
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)
@@ -98,6 +107,7 @@ async function borrar(tabla, id) {
     if (hijo === 'acta_item') { await db.run(`DELETE FROM acta_item WHERE ${col} = ?`, id); continue; }
     for (const h of await db.all(`SELECT id FROM ${hijo} WHERE ${col} = ?`, id)) await borrar(hijo, h.id);
   }
+  if (tabla === 'otrosi') await db.run('UPDATE item SET otrosi_id = NULL WHERE otrosi_id = ?', id);
   if (tabla === 'gasto' || tabla === 'item') await db.run('UPDATE gasto SET item_id = NULL WHERE item_id = ?', tabla === 'item' ? id : -1);
   await db.run(`DELETE FROM ${tabla} WHERE id = ?`, id);
 }
@@ -116,12 +126,25 @@ function totales(c, cd, otros = 0) {
   return { costo_directo: r2(cd), administracion: r2(a), imprevistos: r2(i), utilidad: r2(u), iva: r2(iva), otros: r2(otros), total: r2(cd + a + i + u + iva + otros) };
 }
 
+// Cantidades que suman o restan los otrosíes firmados, por ítem
+async function cambiosOtrosi(contratoId) {
+  return new Map((await db.all(`SELECT oi.item_id, SUM(oi.cantidad) q FROM otrosi_item oi JOIN otrosi o ON o.id = oi.otrosi_id
+    WHERE o.contrato_id = ? AND o.estado = 'Firmado' GROUP BY oi.item_id`, contratoId)).map(r => [r.item_id, r.q]));
+}
+
+// Presupuesto original y vigente (cantidad contratada vigente = original + otrosíes firmados)
 async function presupuesto(contratoId) {
   const c = await db.get('SELECT * FROM contrato WHERE id = ?', contratoId);
   const items = await db.all('SELECT * FROM item WHERE contrato_id = ? ORDER BY orden, id', contratoId);
-  let cd = 0, otros = 0;
-  for (const it of items) if (it.tipo === 1) { const v = it.cantidad * it.vr_unitario; it.sin_aiu ? (otros += v) : (cd += v); }
-  return { contrato: c, items, totales: totales(c, cd, otros) };
+  const cambios = await cambiosOtrosi(contratoId);
+  let cd = 0, otros = 0, cdV = 0, otrosV = 0;
+  for (const it of items) {
+    if (it.tipo !== 1) continue;
+    it.cantidad_vigente = r2((it.cantidad || 0) + (cambios.get(it.id) || 0));
+    const v = it.cantidad * it.vr_unitario, vv = it.cantidad_vigente * it.vr_unitario;
+    if (it.sin_aiu) { otros += v; otrosV += vv; } else { cd += v; cdV += vv; }
+  }
+  return { contrato: c, items, totales: totales(c, cd, otros), totales_vigentes: totales(c, cdV, otrosV) };
 }
 
 // Detalle de un acta: por ítem, cantidad contratada, anterior, esta acta, acumulado y saldo
@@ -137,8 +160,8 @@ async function detalleActa(actaId) {
     const a = act.get(it.id) || {}, anterior = ant.get(it.id) || 0;
     const pres = a.cant_presentada || 0, apr = a.cant_aprobada || 0, acum = anterior + apr;
     return { ...it, anterior, cant_presentada: pres, cant_aprobada: apr, observacion: a.observacion || '',
-      acumulado: acum, saldo: it.cantidad - acum, vr_acta: r2(apr * it.vr_unitario), vr_presentado: r2(pres * it.vr_unitario),
-      vr_acumulado: r2(acum * it.vr_unitario), pct: it.cantidad ? acum / it.cantidad : 0 };
+      acumulado: acum, saldo: it.cantidad_vigente - acum, vr_acta: r2(apr * it.vr_unitario), vr_presentado: r2(pres * it.vr_unitario),
+      vr_acumulado: r2(acum * it.vr_unitario), pct: it.cantidad_vigente ? acum / it.cantidad_vigente : 0 };
   });
   const suma = (k, f) => filas.filter(x => x.tipo === 1 && f(x)).reduce((s, x) => s + x[k], 0);
   const conAiu = x => !x.sin_aiu, sinAiu = x => !!x.sin_aiu;
@@ -592,6 +615,7 @@ async function api(req, res, url) {
       if (!antes) throw new Rechazo(404, 'No existe');
       if (tabla === 'acta') await validarEstado(u, antes, d);
       if (tabla === 'social' && d.tipo === 'PQRS' && !antes.plazo && !d.plazo) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), 15);
+      if (tabla === 'item' && d.vr_unitario != null && d.vr_unitario !== antes.vr_unitario) await precioLibre(id);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (k.length) await db.run(`UPDATE ${tabla} SET ${k.map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
       const cambio = diferencia(antes, d);

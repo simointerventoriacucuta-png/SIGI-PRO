@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS item (
   cantidad REAL DEFAULT 0,
   vr_unitario REAL DEFAULT 0,
   sin_aiu INTEGER DEFAULT 0,      -- 1 = va por fuera del AIU (PMT, PMA...)
-  orden INTEGER DEFAULT 0
+  orden INTEGER DEFAULT 0,
+  otrosi_id INTEGER,              -- ítem no previsto: otrosí que lo aprobó
+  apu TEXT                        -- análisis de precio unitario (JSON)
 );
 
 -- Actas parciales (equivalen a las "estimaciones")
@@ -356,4 +358,13 @@ CREATE TABLE IF NOT EXISTS liquidacion (
   paz_y_salvos TEXT,
   observaciones TEXT,
   estado TEXT DEFAULT 'En trámite'  -- En trámite, Firmada, Cerrada
+);
+
+-- Cantidades que cada otrosí suma (+) o resta (−) a un ítem del presupuesto
+CREATE TABLE IF NOT EXISTS otrosi_item (
+  id INTEGER PRIMARY KEY,
+  otrosi_id INTEGER NOT NULL REFERENCES otrosi(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES item(id) ON DELETE CASCADE,
+  cantidad REAL DEFAULT 0,
+  vr_unitario REAL                  -- opcional, para ítems nuevos
 );
