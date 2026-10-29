@@ -36,11 +36,22 @@ function contenidosGemini(mensajes) {
     return { role: m.role === 'assistant' ? 'model' : 'user', parts };
   });
 }
+// Si el modelo está saturado (503) o pidió esperar (429), reintenta con pausa y luego con un modelo alterno
+const ALTERNOS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+const espera = ms => new Promise(ok => setTimeout(ok, ms));
 async function turnoGemini(cfg, sistema, mensajes, herramientas, alTexto) {
   if (!cfg.clave_gemini) throw new ErrorProveedor(400, 'Falta la clave de Gemini. El director la configura en Inicio → Asistente → Clave del asistente.');
-  const modelo = cfg.modelo_gemini || 'gemini-flash-latest';
+  const modelos = [...new Set([cfg.modelo_gemini || ALTERNOS[0], ...ALTERNOS])];
+  let ultimo;
+  for (const modelo of modelos) for (let intento = 0; intento < 2; intento++) {
+    try { return await llamarGemini(cfg, modelo, sistema, mensajes, herramientas, alTexto); }
+    catch (e) { if (!e.saturado) throw e; ultimo = e; await espera(1500 * (intento + 1)); }
+  }
+  throw ultimo;
+}
+async function llamarGemini(cfg, modelo, sistema, mensajes, herramientas, alTexto) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:streamGenerateContent?alt=sse`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.clave_gemini },
+    method: 'POST', signal: AbortSignal.timeout(120000), headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.clave_gemini },
     body: JSON.stringify({ systemInstruction: { parts: [{ text: sistema }] }, contents: contenidosGemini(mensajes),
       tools: [{ functionDeclarations: herramientas.map(h => ({ name: h.name, description: h.description, parameters: esquemaGemini(h.input_schema) })) }] }),
   });
@@ -48,14 +59,14 @@ async function turnoGemini(cfg, sistema, mensajes, herramientas, alTexto) {
     const t = await r.text();
     if (r.status === 400 && /API key/i.test(t) || r.status === 401 || r.status === 403) throw new ErrorProveedor(400, 'La clave de Gemini no es válida o no tiene acceso a la API');
     if (r.status === 404) throw new ErrorProveedor(400, `El modelo "${modelo}" no existe en Gemini. Revise el nombre del modelo en la configuración.`);
-    if (r.status === 429) throw new ErrorProveedor(429, 'Se alcanzó el límite de consultas de Gemini: intente en un minuto o revise sus créditos.');
+    if (r.status === 429 || r.status === 503) throw Object.assign(new ErrorProveedor(r.status, r.status === 503 ? 'Gemini está saturado en este momento: intente de nuevo en unos minutos.' : 'Se alcanzó el límite de consultas de Gemini: intente en un minuto o revise sus créditos.'), { saturado: true });
     throw new ErrorProveedor(502, 'Error de Gemini: ' + t.slice(0, 300));
   }
   const content = [];
   let texto = '', buf = '', bloqueado = false;
   const dec = new TextDecoder();
   for await (const trozo of r.body) {
-    buf += dec.decode(trozo, { stream: true });
+    buf += dec.decode(trozo, { stream: true }).replace(/\r\n/g, '\n');
     let i;
     while ((i = buf.indexOf('\n\n')) >= 0) {
       const linea = buf.slice(0, i).split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5)).join('');

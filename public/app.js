@@ -1226,11 +1226,11 @@ async function conversar(cuerpo) {
 async function configurarAsistente() {
   const s = await api('asistente/config');
   const puesta = t => (t ? 'guardada — deje vacío para conservarla' : 'pegue aquí la clave');
-  $('#dialogo-form').innerHTML = `<h3>Proveedor del asistente</h3>
+  // Por ahora solo Gemini; Ollama y Claude siguen disponibles en el servidor (proveedores.js) para activarlos después
+  if (s.proveedor !== 'gemini') s.proveedor = 'gemini';
+  $('#dialogo-form').innerHTML = `<h3>Asistente con Gemini (Google)</h3>
     <div class="proveedores">
       <label><input type="radio" name="prov" value="gemini" ${s.proveedor === 'gemini' ? 'checked' : ''}><b>Gemini</b> (Google) · gratis con límites, o con los créditos mensuales de Google AI Pro</label>
-      <label><input type="radio" name="prov" value="ollama" ${s.proveedor === 'ollama' ? 'checked' : ''}><b>Ollama</b> · gratis en este computador · los datos no salen del equipo</label>
-      <label><input type="radio" name="prov" value="claude" ${s.proveedor === 'claude' ? 'checked' : ''}><b>Claude</b> (Anthropic) · de pago por uso · el mejor para análisis</label>
     </div>
     <div class="formulario" style="grid-template-columns:150px 1fr">
       <label data-p="claude">Clave de Claude</label><input data-p="claude" id="ia-clave" type="password" placeholder="${puesta(s.tiene_clave)}">
