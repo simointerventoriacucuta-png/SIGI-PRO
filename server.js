@@ -7,7 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
-const { informeFormato, informeSSTFormato, informeAmbiental } = require('./informe.js');
+const { informeFormato, informeSSTFormato, informeAmbiental, informeSocial } = require('./informe.js');
 const { cargarPaga } = require('./seed/paga.js');
 const prov = require('./proveedores.js');
 const { crearCorreo } = require('./correo.js');
@@ -33,11 +33,14 @@ const TABLAS = {
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
   tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'proyecto_id'])), ambiental: 'proyecto_id', pmt: 'proyecto_id', ...Object.fromEntries(AMB.map(t => [t, 'proyecto_id'])), social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
   requisicion: 'proyecto_id', requisicion_item: 'requisicion_id',
+  pqrs: 'proyecto_id', reunion: 'proyecto_id', acta_vecindad: 'proyecto_id', mano_obra: 'proyecto_id', capacitacion: 'proyecto_id', afectacion: 'proyecto_id', encuesta: 'proyecto_id', veeduria: 'proyecto_id', ficha_social: null,
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
-    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ...SST_ANEXOS.map(t => [t, 'proyecto_id']), ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ...AMB.map(t => [t, 'proyecto_id']), ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id'], ['requisicion', 'proyecto_id']],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ...SST_ANEXOS.map(t => [t, 'proyecto_id']), ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ...AMB.map(t => [t, 'proyecto_id']), ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id'], ['requisicion', 'proyecto_id'],
+    ['pqrs', 'proyecto_id'], ['reunion', 'proyecto_id'], ['acta_vecindad', 'proyecto_id'], ['mano_obra', 'proyecto_id'], ['capacitacion', 'proyecto_id'], ['afectacion', 'proyecto_id'], ['encuesta', 'proyecto_id'], ['veeduria', 'proyecto_id']],
+
   requisicion: [['requisicion_item', 'requisicion_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
   adjunto: [['adjunto_dato', 'adjunto_id']],
@@ -53,8 +56,8 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', ...AMB, 'requisicion', 'requisicion_item'],
-  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', ...AMB, 'requisicion', 'requisicion_item'],
+  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria', ...AMB, 'requisicion', 'requisicion_item'],
+  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria', ...AMB, 'requisicion', 'requisicion_item'],
   administrativo: ['adjunto', 'otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento', 'requisicion', 'requisicion_item'],
   entidad: [],
 };
@@ -174,6 +177,28 @@ async function precioLibre(itemId) {
   if (a) throw new Rechazo(409, `El ítem está en el acta ${a.numero} "${a.estado}": su valor unitario no se puede cambiar`);
 }
 
+// Fichas sociales del PAGA según la Guía de Manejo Ambiental del INVÍAS 2022 (programas 6 a 10). Los códigos se comparten con el área ambiental.
+const FICHAS_SOCIALES = [
+  ['PDL-6.1-21', '6. Gestión social y desarrollo local', 'Mano de obra contratada con enfoque de género, de derechos y diferencial'],
+  ['PDL-6.2-22', '6. Gestión social y desarrollo local', 'Obras de participación comunitaria'],
+  ['PDL-6.3-23', '6. Gestión social y desarrollo local', 'Desarrollo local (según el PAGA del proyecto)'],
+  ['PPSI-7.1-24', '7. Patrimonio', 'Patrimonio (según el PAGA del proyecto)'],
+  ['PPSI-7.2-25', '7. Patrimonio', 'Protección del patrimonio cultural'],
+  ['PPSI-7.3-26', '7. Patrimonio', 'Protección del patrimonio geológico y paleontológico'],
+  ['PPSI-7.4-27', '7. Patrimonio', 'Acompañamiento a la consulta previa con comunidades étnicas'],
+  ['PGS-8.1-28', '8. Predios y servicios', 'Infraestructura de predios y servicios públicos'],
+  ['PGS-8.2-29', '8. Predios y servicios', 'Apoyo a la gestión interinstitucional'],
+  ['PGS-8.3-30', '8. Predios y servicios', 'Acompañamiento a la gestión socio predial'],
+  ['PA-9.1-31', '9. Accesibilidad', 'Accesibilidad de la población e integración territorial'],
+  ['PPGI-10.1-32', '10. Participación, gobernanza e inclusión', 'Atención a la comunidad'],
+  ['PPGI-10.2-33', '10. Participación, gobernanza e inclusión', 'Información y divulgación'],
+  ['PPGI-10.3-34', '10. Participación, gobernanza e inclusión', 'Cultura vial y participación comunitaria'],
+  ['PPGI-10.4-35', '10. Participación, gobernanza e inclusión', 'Inclusión social con perspectiva de género y transversalización'],
+  ['PPG-10.5-36', '10. Participación, gobernanza e inclusión', 'Gobernanza'],
+];
+// Ficha por defecto de cada registro social
+const FICHA_DE = { pqrs: 'PPGI-10.1-32', reunion: 'PPGI-10.2-33', acta_vecindad: 'PGS-8.3-30', mano_obra: 'PDL-6.1-21', capacitacion: 'PPGI-10.3-34', afectacion: 'PGS-8.1-28', encuesta: 'PPGI-10.1-32' };
+
 async function iniciar() {
   await db.abrir();
   await db.exec(ESQUEMA);
@@ -187,6 +212,7 @@ async function iniciar() {
   const colBit = (await db.all('PRAGMA table_info(bitacora)')).map(c => c.name);
   for (const c of ['hora', 'incidentes', 'visitas', 'firma_residente', 'firma_interventoria']) if (!colBit.includes(c)) await db.run(`ALTER TABLE bitacora ADD COLUMN ${c} TEXT`);
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
+  for (const f of FICHAS_SOCIALES) await db.run('INSERT OR IGNORE INTO ficha_social (codigo, programa, nombre) VALUES (?,?,?)', ...f);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)
   if (!(await db.get('SELECT COUNT(*) n FROM usuario')).n)
@@ -354,8 +380,8 @@ async function buscar(proyectoId, texto) {
   }
   const TEXTO = { vencimiento: ['descripcion', 'tipo', 'responsable'], correspondencia: ['asunto', 'radicado', 'de', 'para'], personal: ['nombre', 'cargo'],
     poliza: ['amparo', 'aseguradora', 'numero'], bitacora: ['actividades', 'frente', 'observaciones'], ensayo: ['ensayo', 'item', 'abscisa', 'resultado'],
-    sst: ['tipo', 'descripcion', 'hallazgo', 'frente'], ambiental: ['programa', 'ficha', 'actividad', 'hallazgo', 'permiso'], social: ['tipo', 'ficha', 'comunidad', 'descripcion'], pmt: ['frente', 'radicado', 'dispositivos'], tarea: ['nombre', 'wbs'] };
-  const NOMBRE = { vencimiento: 'Vencimientos', correspondencia: 'Correspondencia', personal: 'Personal', poliza: 'Pólizas', bitacora: 'Bitácora', ensayo: 'Ensayos', sst: 'SST', ambiental: 'Ambiental', social: 'Social', pmt: 'PMT', tarea: 'Programa de obra' };
+    sst: ['tipo', 'descripcion', 'hallazgo', 'frente'], ambiental: ['programa', 'ficha', 'actividad', 'hallazgo', 'permiso'], social: ['tipo', 'ficha', 'comunidad', 'descripcion'], pmt: ['frente', 'radicado', 'dispositivos'], pqrs: ['radicado', 'tipo', 'descripcion', 'frente'], reunion: ['tipo', 'lugar', 'comunidad', 'temas'], acta_vecindad: ['predio', 'direccion', 'abscisa'], afectacion: ['tipo', 'descripcion', 'empresa'], tarea: ['nombre', 'wbs'] };
+  const NOMBRE = { vencimiento: 'Vencimientos', correspondencia: 'Correspondencia', personal: 'Personal', poliza: 'Pólizas', bitacora: 'Bitácora', ensayo: 'Ensayos', sst: 'SST', ambiental: 'Ambiental', social: 'Social', pmt: 'PMT', pqrs: 'PQRS', reunion: 'Reuniones', acta_vecindad: 'Actas de vecindad', afectacion: 'Afectaciones', tarea: 'Programa de obra' };
   for (const [tabla, cols] of Object.entries(TEXTO)) {
     const filas = await db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ? AND (${cols.map(k => k + ' LIKE ?').join(' OR ')}) LIMIT 10`, proyectoId, ...cols.map(() => like));
     for (const f of filas) out.push({ grupo: NOMBRE[tabla], titulo: cols.map(k => f[k]).filter(Boolean).join(' · ') + (f.fecha ? ' · ' + f.fecha : ''), abrir: tabla === 'tarea' ? 'programa' : 'tabla:' + tabla });
@@ -377,6 +403,10 @@ async function avisos(proyectoId) {
   for (const [tabla, nombre, campo] of [['sst', 'SST', 'descripcion'], ['ambiental', 'Ambiental', 'actividad'], ['social', 'Social', 'descripcion']])
     for (const r of await db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ? AND COALESCE(estado, '') <> 'Cerrado' AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
       out.push({ fecha: r.plazo, tipo: nombre, texto: [r.tipo || r.componente, r.accion || r[campo]].filter(Boolean).join(': '), abrir: 'tabla:' + tabla });
+  for (const r of await db.all(`SELECT * FROM pqrs WHERE proyecto_id = ? AND COALESCE(estado, '') NOT IN ('Respondida', 'Cerrada') AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
+    out.push({ fecha: r.plazo, tipo: 'PQRS', texto: `${r.plazo < iso(hoy) ? 'Vencida' : 'Por vencer'}: ${r.tipo || 'PQRS'} ${r.radicado || ''} ${r.descripcion || ''}`.replace(/\s+/g, ' ').trim(), abrir: 'tabla:pqrs' });
+  for (const a of await db.all(`SELECT * FROM acta_vecindad WHERE proyecto_id = ? AND estado = 'Cierre pendiente'`, proyectoId))
+    out.push({ fecha: a.fecha_inicio || iso(hoy), tipo: 'Social', texto: `Levantar el acta de vecindad de cierre del predio ${a.predio || a.direccion || ''}`.trim(), abrir: 'tabla:acta_vecindad' });
   for (const m of await db.all(`SELECT * FROM pmt WHERE proyecto_id = ? AND estado <> 'Cerrado' AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, proyectoId, limite))
     out.push({ fecha: m.hasta, tipo: 'PMT', texto: `Vence la aprobación del PMT ${m.frente || ''} ${m.abs_ini ? '(' + m.abs_ini + ' a ' + (m.abs_fin || '') + ')' : ''}`.trim(), abrir: 'tabla:pmt' });
   // Permisos ambientales: aviso con 30 días porque su renovación se tramita ante la autoridad ambiental
@@ -447,7 +477,7 @@ const txt = d => ({ type: 'string', description: d });
 const HERRAMIENTAS = [
   { name: 'consultar_tabla', description: 'Lee registros de una tabla del proyecto actual. Filtros por igualdad exacta; si el valor tiene % se usa LIKE. Devuelve como máximo "limite" filas (50 por defecto).',
     input_schema: obj({ tabla: { type: 'string', enum: ['contrato', 'item', 'acta', 'otrosi', 'suspension', 'liquidacion', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo',
-      'tarea', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', ...AMB, 'social', 'adjunto'] },
+      'tarea', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', ...AMB, 'social', 'pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria', 'adjunto'] },
       filtros: { type: 'object', description: 'Columna → valor, p. ej. {"estado":"Pendiente"}', additionalProperties: { type: ['string', 'number'] } },
       limite: { type: 'integer', minimum: 1, maximum: 200 } }, ['tabla']) },
   { name: 'detalle_acta', description: 'Detalle de un acta parcial o cuenta de cobro: por ítem con movimiento, cantidad contratada, anterior, presentada, aprobada, acumulada, saldo y valores; y los totales.',
@@ -674,7 +704,8 @@ const INSTRUCCION_DOCUMENTO = `Eres un ingeniero de interventoría de obras vial
 - ensayo: informe o resultados de laboratorio: un elemento por ensayo.
 - factura: factura, cuenta de cobro o soporte de gasto.
 - otrosi: otrosí, adición, prórroga, modificación o suspensión del contrato.
-- reunion: acta de reunión, socialización o comité.
+- reunion: acta de reunión con la comunidad, socialización o comité (inicio, avance o finalización), con asistentes y compromisos.
+- pqrs: derecho de petición, queja, reclamo, sugerencia, denuncia o consulta de la comunidad (Ley 1755 de 2015).
 - presupuesto: cuadro de cantidades/presupuesto (ítems con código, descripción, unidad, cantidad y valor unitario).
 - personal: lista de personal (nombre, cargo, dedicación).
 - avance: apuntes, reporte o planilla de obra ejecutada en campo (qué se hizo, dónde y cuánto): un elemento por cada actividad ejecutada en "avances", con el código del ítem del presupuesto de obra que corresponda (de la lista que se te da; si no hay uno claro, déjalo vacío), abscisas como texto tal cual (p. ej. K0+120) y medidas en metros.
@@ -683,7 +714,7 @@ Además, en "vencimientos" lista toda obligación o fecha límite que el documen
 Fechas AAAA-MM-DD. Valores en pesos como número sin puntos. Porcentajes como número. No inventes: deja vacío lo que no esté. En "resumen" explica en 1 o 2 frases qué es el documento y en "observaciones" lo que la interventoría debería revisar.`;
 const txtE = { type: 'string' }, numE = { type: 'number' };
 const ESQUEMA_DOCUMENTO = { type: 'object', required: ['tipo', 'resumen'], properties: {
-  tipo: { type: 'string', enum: ['poliza', 'oficio', 'ensayo', 'factura', 'otrosi', 'reunion', 'presupuesto', 'personal', 'avance', 'otro'] },
+  tipo: { type: 'string', enum: ['poliza', 'oficio', 'ensayo', 'factura', 'otrosi', 'reunion', 'pqrs', 'presupuesto', 'personal', 'avance', 'otro'] },
   avances: { type: 'array', items: { type: 'object', properties: { fecha: txtE, codigo_item: txtE, actividad: txtE, frente: txtE, abscisa_inicial: txtE, abscisa_final: txtE, largo: numE, ancho: numE, espesor: numE, piezas: numE, cantidad: numE } } },
   resumen: txtE, observaciones: txtE, contrato: { type: 'string', enum: ['Obra', 'Interventoría'], description: 'a qué contrato corresponde, si se sabe' },
   poliza: { type: 'object', properties: { aseguradora: txtE, numero: txtE, tomador: txtE, asegurado: txtE,
@@ -692,7 +723,8 @@ const ESQUEMA_DOCUMENTO = { type: 'object', required: ['tipo', 'resumen'], prope
   ensayos: { type: 'array', items: { type: 'object', properties: { fecha: txtE, ensayo: txtE, norma: txtE, item: txtE, abscisa: txtE, resultado: txtE, especificacion: txtE, cumple: { type: 'string', enum: ['Sí', 'No', 'Pendiente'] }, laboratorio: txtE } } },
   factura: { type: 'object', properties: { fecha: txtE, proveedor: txtE, documento: txtE, descripcion: txtE, valor: numE } },
   otrosi: { type: 'object', properties: { fecha: txtE, tipo: { type: 'string', enum: ['Adición', 'Prórroga', 'Adición y prórroga', 'Modificación', 'Suspensión'] }, valor: numE, dias: numE, objeto: txtE } },
-  reunion: { type: 'object', properties: { fecha: txtE, tipo: txtE, comunidad: txtE, descripcion: txtE, asistentes: numE } },
+  reunion: { type: 'object', properties: { fecha: txtE, tipo: txtE, lugar: txtE, comunidad: txtE, descripcion: txtE, compromisos: txtE, acta: txtE, convocados: numE, asistentes: numE } },
+  pqrs: { type: 'object', properties: { fecha: txtE, radicado: txtE, tipo: { type: 'string', enum: ['Petición', 'Queja', 'Reclamo', 'Sugerencia', 'Denuncia', 'Solicitud de documentos', 'Consulta', 'Felicitación'] }, canal: txtE, peticionario: txtE, frente: txtE, descripcion: txtE } },
   items: { type: 'array', items: { type: 'object', properties: { codigo: txtE, descripcion: txtE, unidad: txtE, cantidad: numE, vr_unitario: numE } } },
   personas: { type: 'array', items: { type: 'object', properties: { nombre: txtE, cargo: txtE, dedicacion: numE } } },
   vencimientos: { type: 'array', items: { type: 'object', properties: { fecha: txtE, descripcion: txtE, responsable: txtE } } },
@@ -713,7 +745,10 @@ async function propuestasDocumento(pid, d, nombre, u) {
   if (d.tipo === 'ensayo') for (const e of d.ensayos || []) add('ensayo', `Ensayo ${e.ensayo || ''} ${e.abscisa || ''}`, { proyecto_id: pid, ...e });
   if (d.tipo === 'factura' && d.factura && cid('interventoria')) add('gasto', `Gasto: ${d.factura.proveedor || ''} ${d.factura.documento || ''}`, { contrato_id: cid('interventoria'), ...d.factura, pagado: 'No' });
   if (d.tipo === 'otrosi' && d.otrosi && cid(contratoDoc)) add('otrosi', `Otrosí (${d.otrosi.tipo || ''}) del contrato de ${contratoDoc === 'obra' ? 'obra' : 'interventoría'}`, { contrato_id: cid(contratoDoc), ...d.otrosi, estado: 'En trámite' });
-  if (d.tipo === 'reunion' && d.reunion) add('social', `Reunión: ${d.reunion.tipo || ''} ${d.reunion.comunidad || ''}`, { proyecto_id: pid, ...d.reunion, tipo: /vecindad/i.test(d.reunion.tipo || '') ? 'Acta de vecindad' : /social/i.test(d.reunion.tipo || '') ? 'Socialización' : 'Reunión de avance', estado: 'Cerrado' });
+  if (d.tipo === 'reunion' && d.reunion) { const x = d.reunion, t = x.tipo || '';
+    add('reunion', `Reunión: ${t} ${x.comunidad || ''}`, { proyecto_id: pid, fecha: x.fecha || hoy, tipo: /inicio/i.test(t) ? 'Inicio' : /final|cierre/i.test(t) ? 'Finalización' : /comit/i.test(t) ? 'Comité de participación' : /extra/i.test(t) ? 'Extraordinaria' : 'Avance',
+      lugar: x.lugar, comunidad: x.comunidad, convocados: x.convocados, asistentes: x.asistentes, temas: x.descripcion, compromisos: x.compromisos, acta: x.acta, estado: 'Realizada' }); }
+  if (d.tipo === 'pqrs' && d.pqrs) add('pqrs', `PQRS ${d.pqrs.radicado || ''}: ${d.pqrs.tipo || ''}`, { proyecto_id: pid, ...d.pqrs, fecha: d.pqrs.fecha || hoy, tipo: d.pqrs.tipo || 'Petición', estado: 'Abierta' });
   if (d.tipo === 'presupuesto' && cid(contratoDoc)) for (const it of (d.items || []).slice(0, 500)) add('item', `${it.codigo || ''} ${it.descripcion || ''}`, { contrato_id: cid(contratoDoc), tipo: it.unidad || it.cantidad ? 1 : 0, ...it });
   if (d.tipo === 'personal') for (const p of d.personas || []) add('personal', `${p.nombre || ''} · ${p.cargo || ''}`, { proyecto_id: pid, ...p, estado: 'Propuesto' });
   if (d.tipo === 'avance' && cid('obra')) {
@@ -780,12 +815,31 @@ async function vincularAvance(id) {
   await moverAvance({ ...av, acta_id: a.id }, 1);
 }
 
-// Plazo en días hábiles (sin sábados ni domingos; los festivos se ajustan a mano). PQRS: 15 días, Ley 1755 de 2015
+// Festivos de Colombia (Ley 51 de 1983): fijos, trasladables al lunes y los que dependen de la Pascua
+function pascua(a) {
+  const b = a % 19, c = Math.floor(a / 100), d = a % 100, e = (19 * b + c - Math.floor(c / 4) - Math.floor((c - Math.floor((8 * c + 13) / 25)) / 3) + 15) % 30;
+  const f = (32 + 2 * (c % 4) + 2 * Math.floor(d / 4) - e - (d % 4)) % 7, g = Math.floor((b + 11 * e + 19 * f) / 433);
+  const m = Math.floor((e + f - 7 * g + 90) / 25);
+  return new Date(Date.UTC(a, m - 1, (e + f - 7 * g + 33 * m + 19) % 32));
+}
+const festivosCache = {};
+function festivos(a) {
+  if (festivosCache[a]) return festivosCache[a];
+  const iso = d => d.toISOString().slice(0, 10), dia = (m, d) => new Date(Date.UTC(a, m - 1, d));
+  const lunes = d => { while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1); return d; };
+  const p = pascua(a), mas = n => new Date(p.getTime() + n * 86400000);
+  const fijos = [[1, 1], [5, 1], [7, 20], [8, 7], [12, 8], [12, 25]].map(([m, d]) => dia(m, d));
+  const mover = [[1, 6], [3, 19], [6, 29], [8, 15], [10, 12], [11, 1], [11, 11]].map(([m, d]) => lunes(dia(m, d)));
+  return (festivosCache[a] = new Set([...fijos, ...mover, mas(-3), mas(-2), lunes(mas(39)), lunes(mas(60)), lunes(mas(68))].map(iso)));
+}
+// Plazo en días hábiles (sin sábados, domingos ni festivos de Colombia)
 function diasHabiles(desde, n) {
   const d = new Date(desde + 'T00:00:00Z');
-  while (n > 0) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) n--; }
+  while (n > 0) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6 && !festivos(d.getUTCFullYear()).has(d.toISOString().slice(0, 10))) n--; }
   return d.toISOString().slice(0, 10);
 }
+// Ley 1755 de 2015, art. 14: 15 días en general, 10 para documentos e información, 30 para consultas
+const diasPQRS = tipo => (/documento|informaci/i.test(tipo || '') ? 10 : /consulta/i.test(tipo || '') ? 30 : 15);
 
 // GTC 45: NP = ND × NE, NR = NP × NC, nivel de riesgo e interpretación
 function nivelRiesgo(nr) {
@@ -879,6 +933,27 @@ async function ambientalMes(pid, ini, fin, del) {
     forestal: forestal.filter(f => f.fecha >= ini && f.fecha <= fin), forestal_tot: { inventario: forestal.length, intervenidos: forestal.filter(f => ['Tala', 'Bloqueo y traslado'].includes(f.tratamiento)).length, compensar: forestal.reduce((a, f) => a + (f.compensar || 0), 0), sembrados: forestal.reduce((a, f) => a + (f.sembrados || 0), 0) },
     agua: await del('agua'), maquinaria: await todos('maquinaria'), monitoreos: await del('monitoreo'), chequeo: await del('amb_chequeo'), pmt_insp: await del('pmt_inspeccion'),
     soportes: await db.all(`SELECT tabla, registro_id, nombre, descripcion, categoria, fecha FROM adjunto WHERE proyecto_id = ? AND tabla IN (${['ambiental', 'pmt', ...AMB].map(() => '?').join(',')}) AND fecha BETWEEN ? AND ? ORDER BY tabla, fecha`, pid, 'ambiental', 'pmt', ...AMB, ini, fin) };
+}
+
+// Gestión social del mes para el informe: PQRS con semáforo, reuniones, actas de vecindad, mano de obra local y demás
+async function gestionSocial(pid, mes, ini, fin, corte) {
+  const t = (tabla, extra = '') => db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ?${extra}`, pid);
+  const enMes = f => f && f >= ini && f <= fin;
+  const pqrs = (await t('pqrs', ' ORDER BY fecha')).filter(p => (p.fecha || '') <= fin).map(p => {
+    const cerrada = ['Respondida', 'Cerrada'].includes(p.estado), resp = p.fecha_respuesta || (cerrada ? corte : null);
+    return { ...p, semaforo: resp ? (p.plazo && resp > p.plazo ? 'Respondida fuera de plazo' : 'Respondida a tiempo') : p.plazo && p.plazo < corte ? 'Vencida' : p.plazo && p.plazo <= diasHabiles(corte, 3) ? 'Por vencer' : 'En término', cerrada };
+  });
+  const mo = (await t('mano_obra', ' ORDER BY mes')).find(m => m.mes === mes) || null;
+  const enc = (await t('encuesta')).filter(e => enMes(e.fecha)), ne = enc.reduce((s, e) => s + (e.encuestados || 0), 0);
+  const av = await t('acta_vecindad', ' ORDER BY predio');
+  return { pqrs_mes: pqrs.filter(p => enMes(p.fecha) || enMes(p.fecha_respuesta) || !p.cerrada), pqrs_recibidas: pqrs.filter(p => enMes(p.fecha)).length,
+    reuniones: (await t('reunion', ' ORDER BY fecha')).filter(r => enMes(r.fecha)),
+    vecindad: av.filter(a => enMes(a.fecha_inicio) || enMes(a.fecha_cierre)), vecindad_total: av.length, vecindad_cerradas: av.filter(a => a.fecha_cierre).length,
+    mano_obra: mo && { ...mo, pct: mo.total ? r2(((mo.local_no_calificada || 0) + (mo.local_calificada || 0)) / mo.total * 100) : null },
+    capacitaciones: (await t('capacitacion', ' ORDER BY fecha')).filter(c => enMes(c.fecha)),
+    afectaciones: (await t('afectacion', ' ORDER BY fecha')).filter(a => enMes(a.fecha) || !['Cerrada', 'Atendida'].includes(a.estado)),
+    encuestas: enc, satisfaccion: ne ? r2(enc.reduce((s, e) => s + (e.satisfechos || 0), 0) / ne * 100) : null,
+    veedurias: await t('veeduria') };
 }
 
 // Cuadros de control del informe mensual: balance por capítulo, curva S, flujo de anticipo
@@ -997,8 +1072,8 @@ async function indicadores(pid) {
   }
   const en30 = new Date(Date.parse(hoy) + 30 * 86400000).toISOString().slice(0, 10), hace7 = new Date(Date.parse(hoy) - 7 * 86400000).toISOString().slice(0, 10);
   const polizas = await db.all(`SELECT * FROM poliza WHERE proyecto_id = ? AND COALESCE(estado, '') NOT IN ('Cerrada') AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, pid, en30);
-  const pqrs = await db.all("SELECT * FROM social WHERE proyecto_id = ? AND tipo = 'PQRS' ORDER BY fecha", pid);
-  const abiertas = pqrs.filter(s => !['Cerrado', 'Respondido'].includes(s.estado));
+  const pqrs = await db.all('SELECT * FROM pqrs WHERE proyecto_id = ? ORDER BY fecha', pid);
+  const abiertas = pqrs.filter(s => !['Cerrada', 'Respondida'].includes(s.estado) && !s.fecha_respuesta);
   const sstMeses = indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', pid));
   const sst = sstMeses.find(m => m.mes === hoy.slice(0, 7)) || sstMeses[sstMeses.length - 1] || null;
   const capturas = await db.all(`SELECT a.id, a.fecha, a.frente, a.abs_ini, a.abs_fin, a.cantidad, a.estado, i.codigo, i.descripcion item, i.unidad FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado' AND a.fecha >= ? ORDER BY a.fecha DESC, a.id DESC`, pid, hace7);
@@ -1023,6 +1098,11 @@ async function calendario(pid, desde, hasta) {
     if (s.tipo === 'PQRS') { add(s.fecha, 'PQRS', 'PQRS recibida: ' + (s.descripcion || ''), 'tabla:social'); add(s.plazo, 'PQRS', 'Plazo de respuesta PQRS: ' + (s.descripcion || ''), 'tabla:social', abierta); }
     else { add(s.fecha, 'Social', [s.tipo, s.comunidad, s.descripcion].filter(Boolean).join(' · '), 'tabla:social'); add(s.plazo, 'Social', 'Plazo: ' + (s.descripcion || s.tipo || ''), 'tabla:social', abierta); }
   }
+  for (const q of await filas('pqrs')) { const abierta = !['Cerrada', 'Respondida'].includes(q.estado) && !q.fecha_respuesta;
+    add(q.fecha, 'PQRS', `${q.tipo || 'PQRS'} recibida ${q.radicado || ''}: ${q.descripcion || ''}`, 'tabla:pqrs'); add(q.plazo, 'PQRS', `Plazo de respuesta ${q.radicado || ''}: ${q.descripcion || ''}`, 'tabla:pqrs', abierta); }
+  for (const r of await filas('reunion')) add(r.fecha, 'Reunión', `Reunión de ${String(r.tipo || '').toLowerCase()} ${r.lugar || r.comunidad || ''}`, 'tabla:reunion', r.estado === 'Programada');
+  for (const a of await filas('acta_vecindad')) { add(a.fecha_inicio, 'Acta de vecindad', `Inicio predio ${a.predio || a.direccion || ''}`, 'tabla:acta_vecindad'); add(a.fecha_cierre, 'Acta de vecindad', `Cierre predio ${a.predio || a.direccion || ''}`, 'tabla:acta_vecindad'); }
+  for (const v of await filas('veeduria')) { add(v.fecha, 'Veeduría', `Conformación ${v.nombre || ''}`, 'tabla:veeduria'); add(v.ultima_reunion, 'Veeduría', `Reunión ${v.nombre || ''}`, 'tabla:veeduria'); }
   for (const c of await filas('correspondencia')) add(c.plazo, 'Correspondencia', `Responder ${c.radicado || ''} ${c.asunto || ''}`, 'tabla:correspondencia', c.requiere_respuesta === 'Sí' && !['Cerrada', 'Respondida'].includes(c.estado));
   for (const m of await filas('pmt')) { add(m.desde, 'PMT', `Inicia vigencia PMT ${m.frente || ''}`, 'tabla:pmt'); add(m.hasta, 'PMT', `Vence PMT ${m.frente || ''}`, 'tabla:pmt', m.estado !== 'Cerrado'); }
   for (const b of await filas('bitacora')) add(b.fecha, 'Bitácora', [b.frente, b.actividades].filter(Boolean).join(': ').slice(0, 120), 'tabla:bitacora');
@@ -1100,6 +1180,7 @@ async function informeMensual(pid, mes) {
       soportes: await db.all(`SELECT tabla, nombre, descripcion, categoria, fecha FROM adjunto WHERE proyecto_id = ? AND tabla LIKE 'sst%' AND fecha BETWEEN ? AND ? ORDER BY tabla, fecha`, pid, ini, fin) },
     pmt: await db.all('SELECT * FROM pmt WHERE proyecto_id = ? AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY frente', pid, fin, ini),
     amb: await ambientalMes(pid, ini, fin, del),
+    gs: await gestionSocial(pid, mes, ini, fin, corte),
     social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
     vencimientos: r.vencimientos,
     director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría',
@@ -1112,7 +1193,7 @@ async function informeMensual(pid, mes) {
     items_np: await db.all("SELECT i.* FROM item i JOIN contrato c ON c.id = i.contrato_id WHERE c.proyecto_id = ? AND i.otrosi_id IS NOT NULL", pid),
     anexos: await (async () => {
       const a = await db.all("SELECT tabla, registro_id, nombre, descripcion, tipo_mime, fecha FROM adjunto WHERE proyecto_id = ? AND categoria <> 'Foto' AND fecha BETWEEN ? AND ?", pid, ini, fin), g = {};
-      for (const x of a) { const t = `${x.nombre || ''} ${x.descripcion || ''}`, k = /\.(dwg|dxf|kmz|kml)$/i.test(x.nombre || '') || /plano/i.test(t) || ['tramo', 'alineamiento'].includes(x.tabla) ? 'planos' : /recibo/i.test(t) ? 'recibo' : /reuni|comit/i.test(t) ? 'social' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : ['ambiental', 'pmt', ...AMB].includes(x.tabla) ? 'ambiental' : 'otros'; (g[k] = g[k] || []).push(x); }
+      for (const x of a) { const t = `${x.nombre || ''} ${x.descripcion || ''}`, k = /\.(dwg|dxf|kmz|kml)$/i.test(x.nombre || '') || /plano/i.test(t) || ['tramo', 'alineamiento'].includes(x.tabla) ? 'planos' : /recibo/i.test(t) ? 'recibo' : ['pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria'].includes(x.tabla) || /reuni|comit/i.test(t) ? 'social' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : ['ambiental', 'pmt', ...AMB].includes(x.tabla) ? 'ambiental' : 'otros'; (g[k] = g[k] || []).push(x); }
       return g; })(),
     // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
     fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
@@ -1250,6 +1331,7 @@ async function api(req, res, url) {
   const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (r0 === 'xlsx' && r1 === 'presupuesto') { const d = await presupuesto(Number(r2_)); return archivo(`Presupuesto_${d.contrato.tipo}.xlsx`, XLSX, await integ.xlsxPresupuesto(d)); }
   if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
+  if (r0 === 'docx' && r1 === 'informe-social') { const d = await informeMensual(Number(r2_), q.mes); d.fichas_social = await db.all('SELECT * FROM ficha_social ORDER BY id'); d.gs.social_mes = d.social; return archivo(`Informe_social_${d.mes}.docx`, DOCX, await informeSocial(d)); }
   if (r0 === 'docx' && r1 === 'informe-sst') { const d = await informeSST(Number(r2_), q.mes); return archivo(`Informe_SST_${d.mes}.docx`, DOCX, await informeSSTFormato(d)); }
   if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await informeFormato(d)); }
   if (r0 === 'docx' && r1 === 'informe-ambiental') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_ambiental_${d.mes}.docx`, DOCX, await informeAmbiental(d)); }
@@ -1519,7 +1601,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
       const filtro = padre && q[padre] ? ` WHERE ${padre} = ?` : '';
-      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', sst_inspeccion: 'fecha DESC', sst_permiso: 'fecha DESC', sst_capacitacion: 'fecha DESC', sst_epp: 'fecha DESC', sst_seguridad_social: 'mes DESC, trabajador', sst_investigacion: 'fecha DESC', sst_emergencia: 'fecha DESC', sst_trabajador: 'nombre', sst_peligro: 'nr DESC, id', sst_equipo: 'equipo', sst_actividad: 'fecha DESC', sst_documento: 'mes DESC, anexo', ambiental: 'fecha DESC', pmt: 'id', amb_ficha: 'programa, codigo', amb_permiso: 'vence IS NULL, vence', rcd: 'fecha DESC', forestal: 'codigo, id', agua: 'fecha DESC', maquinaria: 'equipo', monitoreo: 'fecha DESC', amb_chequeo: 'fecha DESC', pmt_inspeccion: 'fecha DESC', social: 'fecha DESC', requisicion: 'numero DESC' }[tabla] || 'id';
+      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', sst_inspeccion: 'fecha DESC', sst_permiso: 'fecha DESC', sst_capacitacion: 'fecha DESC', sst_epp: 'fecha DESC', sst_seguridad_social: 'mes DESC, trabajador', sst_investigacion: 'fecha DESC', sst_emergencia: 'fecha DESC', sst_trabajador: 'nombre', sst_peligro: 'nr DESC, id', sst_equipo: 'equipo', sst_actividad: 'fecha DESC', sst_documento: 'mes DESC, anexo', ambiental: 'fecha DESC', pmt: 'id', amb_ficha: 'programa, codigo', amb_permiso: 'vence IS NULL, vence', rcd: 'fecha DESC', forestal: 'codigo, id', agua: 'fecha DESC', maquinaria: 'equipo', monitoreo: 'fecha DESC', amb_chequeo: 'fecha DESC', pmt_inspeccion: 'fecha DESC', social: 'fecha DESC', requisicion: 'numero DESC', pqrs: 'fecha DESC, id DESC', reunion: 'fecha DESC', acta_vecindad: 'predio', mano_obra: 'mes DESC', capacitacion: 'fecha DESC', afectacion: 'fecha DESC', encuesta: 'fecha DESC', veeduria: 'id' }[tabla] || 'id';
       return enviar(res, 200, await db.all(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`, ...(filtro ? [Number(q[padre])] : [])));
     }
     if (req.method !== 'GET') exigir(u, tabla);
@@ -1530,6 +1612,8 @@ async function api(req, res, url) {
       if (tabla === 'requisicion') { await validarRQ(u, null, d); if (d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM requisicion WHERE proyecto_id = ?', d.proyecto_id)).m; if (!d.solicitante) d.solicitante = u.nombre; }
       if (tabla === 'requisicion_item') await rqEditable(d.requisicion_id);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
+      if (FICHA_DE[tabla] && !d.ficha) d.ficha = FICHA_DE[tabla];
+      if (tabla === 'pqrs' && !d.plazo) d.plazo = diasHabiles(d.fecha || new Date().toISOString().slice(0, 10), diasPQRS(d.tipo));
       if (tabla === 'social' && d.tipo === 'PQRS' && !d.plazo) d.plazo = diasHabiles(d.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'avance') await prepararAvance(d, u);
       calcularSST(tabla, d);
@@ -1552,6 +1636,7 @@ async function api(req, res, url) {
       const antes = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id);
       if (!antes) throw new Rechazo(404, 'No existe');
       if (tabla === 'acta') await validarEstado(u, antes, d);
+      if (tabla === 'pqrs' && (d.tipo != null || d.fecha != null) && !('plazo' in d)) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), diasPQRS(d.tipo ?? antes.tipo));
       if (tabla === 'requisicion') await validarRQ(u, antes, d);
       if (tabla === 'requisicion_item') await rqEditable(antes.requisicion_id);
       if (tabla === 'social' && d.tipo === 'PQRS' && !antes.plazo && !d.plazo) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), 15);

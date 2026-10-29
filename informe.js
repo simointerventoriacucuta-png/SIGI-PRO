@@ -122,9 +122,34 @@ function cuadroPolizas(pol) {
     tabla(['N.º DE LA PÓLIZA', 'CONCEPTO DEL AMPARO', 'VALOR ASEGURADO', 'DESDE', 'HASTA', 'ESTADO'], pol.map(x => [x.numero || '', x.amparo || '', pesos(x.valor), fecha(x.desde), fecha(x.hasta), x.estado || '']), [2, 3, 2, 2, 2, 1.5], 'Sin pólizas registradas para este contrato.');
 }
 function reuniones(d) {
-  const r = d.social.filter(s => /reuni|socializ|visita|vecindad/i.test(s.tipo || ''));
-  return r.length ? r.map((s, i) => p([[`Reunión N.º ${String(i + 1).padStart(2, '0')} `, { b: true }], `el día ${fecha(s.fecha)}${s.comunidad ? ' con ' + s.comunidad : ''} (${s.tipo}${s.asistentes ? ', ' + s.asistentes + ' asistentes' : ''}): ${s.descripcion || ''}`])).join('')
-    : p('No se registraron reuniones en el periodo.', { i: true, color: '595959' });
+  const g = d.gs?.reuniones || [], r = d.social.filter(s => /reuni|socializ|visita|vecindad/i.test(s.tipo || ''));
+  const cuadro = g.length ? tabla(['N.º', 'FECHA', 'TIPO', 'LUGAR / COMUNIDAD', 'CONVOCADOS / ASISTENTES', 'TEMAS Y COMPROMISOS', 'ACTA', 'LISTA'],
+    g.map((s, i) => [String(i + 1).padStart(2, '0'), fecha(s.fecha), s.tipo || '', [s.lugar, s.comunidad].filter(Boolean).join(' · '), `${s.convocados ?? '—'} / ${s.asistentes ?? '—'}`, [s.temas, s.compromisos && 'Compromisos: ' + s.compromisos].filter(Boolean).join('. '), s.acta || '', s.lista_asistencia || '']), [0.6, 1.4, 1.2, 1.8, 1.2, 3.2, 0.9, 0.7]) : '';
+  const otras = r.map((s, i) => p([[`Reunión N.º ${String(g.length + i + 1).padStart(2, '0')} `, { b: true }], `el día ${fecha(s.fecha)}${s.comunidad ? ' con ' + s.comunidad : ''} (${s.tipo}${s.asistentes ? ', ' + s.asistentes + ' asistentes' : ''}): ${s.descripcion || ''}`])).join('');
+  return cuadro + otras || p('No se registraron reuniones en el periodo.', { i: true, color: '595959' });
+}
+// Cuadros de gestión social del mes (PGS del INVÍAS / PGSC de la ANI)
+function gestionSocial(d) {
+  const g = d.gs;
+  if (!g) return '';
+  const mo = g.mano_obra, sub = t => p(t, { b: true, sangria: 560, despues: 60 });
+  return [
+    sub('a) Atención al ciudadano: PQRS (Ley 1755 de 2015)'),
+    p(`Recibidas en el mes: ${g.pqrs_recibidas}. Vencidas sin respuesta: ${g.pqrs_mes.filter(x => x.semaforo === 'Vencida').length}. Por vencer: ${g.pqrs_mes.filter(x => x.semaforo === 'Por vencer').length}.`),
+    tabla(['RADICADO', 'FECHA', 'TIPO', 'CANAL', 'ASUNTO', 'PLAZO', 'RESPUESTA', 'SEMÁFORO'], g.pqrs_mes.map(x => [x.radicado || '', fecha(x.fecha), x.tipo || '', x.canal || '', x.descripcion || '', fecha(x.plazo), x.fecha_respuesta ? fecha(x.fecha_respuesta) : x.estado || '', x.semaforo]), [1.2, 1.3, 1.1, 1.1, 2.6, 1.3, 1.3, 1.2], 'Sin PQRS en el periodo.'),
+    sub('b) Actas de vecindad'),
+    p(`Predios con acta de inicio: ${g.vecindad_total}; con acta de cierre: ${g.vecindad_cerradas}.`),
+    tabla(['PREDIO', 'DIRECCIÓN / ABSCISA', 'TIPO', 'ACTA DE INICIO', 'ACTA DE CIERRE', 'DAÑOS', 'PAZ Y SALVO', 'ESTADO'], g.vecindad.map(a => [a.predio || '', [a.direccion, a.abscisa].filter(Boolean).join(' · '), a.tipo_inmueble || '', fecha(a.fecha_inicio), a.fecha_cierre ? fecha(a.fecha_cierre) : '—', a.danos || '', a.paz_y_salvo || '', a.estado || '']), [1, 2, 1.1, 1.4, 1.4, 0.8, 0.9, 1.3], 'Sin actas de vecindad en el periodo.'),
+    sub('c) Vinculación de mano de obra local'),
+    mo ? tabla(['MES', 'TRABAJADORES', 'LOCAL NO CALIFICADA', 'LOCAL CALIFICADA', 'MUJERES', '% LOCAL', 'META %', 'CUMPLE'], [[mo.mes, mo.total, mo.local_no_calificada, mo.local_calificada, mo.mujeres, mo.pct != null ? num(mo.pct, 1) : '—', mo.meta != null ? num(mo.meta, 1) : '—', mo.meta == null || mo.pct == null ? '—' : mo.pct >= mo.meta ? 'Sí' : 'No']]) : p('Sin reporte de mano de obra local para el mes.', { i: true, color: '595959' }),
+    sub('d) Cultura vial y capacitaciones a la comunidad'),
+    tabla(['FECHA', 'TIPO', 'TEMA', 'PÚBLICO', 'LUGAR', 'ASISTENTES'], g.capacitaciones.map(c => [fecha(c.fecha), c.tipo || '', c.tema || '', c.publico || '', c.lugar || '', c.asistentes ?? '']), [1.4, 1.3, 2.6, 1.4, 1.6, 1], 'Sin actividades de cultura vial o capacitación en el periodo.'),
+    sub('e) Afectaciones a predios y servicios públicos'),
+    tabla(['FECHA', 'TIPO', 'ABSCISA', 'DESCRIPCIÓN', 'AFECTADOS', 'EMPRESA', 'ACCIÓN', 'ESTADO'], g.afectaciones.map(a => [fecha(a.fecha), a.tipo || '', a.abscisa || '', a.descripcion || '', a.afectados ?? '', a.empresa || '', a.accion || '', a.estado || '']), [1.3, 1.2, 1, 2.4, 0.9, 1.2, 1.8, 1], 'Sin afectaciones abiertas ni registradas en el periodo.'),
+    sub('f) Encuestas de satisfacción y veedurías ciudadanas'),
+    p(g.encuestas.length ? `Se aplicaron ${g.encuestas.reduce((s, e) => s + (e.encuestados || 0), 0)} encuesta(s); satisfacción: ${num(g.satisfaccion, 1)} %.` : 'No se aplicaron encuestas de satisfacción en el periodo.'),
+    p(g.veedurias.length ? 'Veedurías ciudadanas (Ley 850 de 2003): ' + g.veedurias.map(v => `${v.nombre || 'sin nombre'} (${v.registro || 'sin registro'}, ${v.estado || ''}${v.ultima_reunion ? ', última reunión ' + fecha(v.ultima_reunion) : ''})`).join('; ') + '.' : 'No hay veedurías ciudadanas registradas para el proyecto.'),
+  ].join('');
 }
 function ensayos(d) {
   return tabla(['FECHA', 'ENSAYO', 'NORMA', 'ÍTEM / ABSCISA', 'RESULTADO', 'ESPECIFICACIÓN', 'CUMPLE', 'LABORATORIO'],
@@ -296,6 +321,7 @@ function capituloContratista(c, d) {
     d.sst.length ? tabla(['FECHA', 'TIPO', 'FRENTE', 'DESCRIPCIÓN', 'ACCIÓN', 'ESTADO'], d.sst.map(s => [fecha(s.fecha), s.tipo || '', s.frente || '', s.descripcion || s.hallazgo || '', s.accion || '', s.estado || '']), [1.4, 1.6, 1.3, 3, 2, 1]) : '',
     p('Resumen de la gestión en seguridad y salud en el trabajo del periodo (detalle y soportes en el anexo 9):'), sstResumen(d), sstCuadros(d),
     p(`Gestión social: ${d.social.length} actividad(es) en el periodo; PQRS abiertas: ${d.pqrs_abiertas.length}${d.pqrs_vencidas.length ? ', vencidas: ' + d.pqrs_vencidas.length : ''}.`),
+    gestionSocial(d),
     p('1.4.5. ACTIVIDADES DE ASEGURAMIENTO DE LA CALIDAD', { b: true, sangria: 280 }),
     p(`Se realizaron ${d.ensayos.length} ensayo(s) en el periodo${d.ensayos.some(e => e.cumple === 'No') ? `, de los cuales ${d.ensayos.filter(e => e.cumple === 'No').length} no cumplieron la especificación` : ''}.`),
     p('1.4.5.1 PRUEBAS Y ENSAYOS', { b: true, sangria: 560 }),
@@ -363,6 +389,11 @@ function observaciones(d, ob) {
   if (ob && (ob.actividades || []).some(a => a.saldo < -1e-9)) o.push('Hay ítems con cantidades acumuladas superiores a las contratadas: se debe tramitar el balance de mayores y menores cantidades antes de continuar su ejecución.');
   const hoy = d.hoy;
   for (const x of d.polizas.filter(x => x.hasta && x.hasta < hoy && !/vencida|cerrada/i.test(x.estado || ''))) o.push(`La póliza ${x.numero || ''} (${x.amparo || ''}) venció el ${fecha(x.hasta)}: solicitar su ampliación.`);
+  const gs = d.gs || {}, venc = (gs.pqrs_mes || []).filter(x => x.semaforo === 'Vencida');
+  if (venc.length) o.push(`Hay ${venc.length} PQRS radicada(s) sin respuesta dentro del término de la Ley 1755 de 2015 (${venc.map(x => x.radicado || 'sin radicado').join(', ')}): requerir la respuesta inmediata al contratista.`);
+  if (gs.mano_obra?.meta != null && gs.mano_obra.pct != null && gs.mano_obra.pct < gs.mano_obra.meta) o.push(`La vinculación de mano de obra local (${num(gs.mano_obra.pct, 1)} %) está por debajo de la meta del contrato (${num(gs.mano_obra.meta, 1)} %).`);
+  for (const a of (gs.afectaciones || []).filter(a => !['Cerrada', 'Atendida'].includes(a.estado))) o.push(`Afectación abierta (${a.tipo || ''}${a.abscisa ? ', ' + a.abscisa : ''}): ${a.descripcion || ''}.`);
+  if (gs.satisfaccion != null && gs.satisfaccion < 70) o.push(`La satisfacción de la comunidad es ${num(gs.satisfaccion, 1)} %: reforzar la divulgación y la atención al ciudadano.`);
   if (d.pqrs_vencidas.length) o.push(`Hay ${d.pqrs_vencidas.length} PQRS con el plazo de respuesta vencido (Ley 1755 de 2015).`);
   for (const c of d.contratos.filter(c => c.suspendido)) o.push(`El contrato ${c.numero || ''} se encuentra suspendido (${c.dias_suspendidos} días): verificar la ampliación de las garantías.`);
   const sa = d.sst_anexos;
@@ -371,11 +402,12 @@ function observaciones(d, ob) {
   if (sa.seguridad_social.some(x => x.verificado === 'No')) o.push('Hay trabajadores sin pago verificado de seguridad social en el mes: no deben ingresar a la obra hasta acreditar la PILA.');
   if (sa.permisos.some(x => x.ats !== 'Sí')) o.push('Se emitieron permisos de trabajo de alto riesgo sin ATS: requerir al contratista el análisis antes de iniciar la labor.');
   for (const v of d.vencimientos.filter(v => v.fecha && v.fecha <= d.fin)) o.push(`Pendiente: ${v.descripcion} (${fecha(v.fecha)}).`);
-  return titulo('3.  OBSERVACIONES Y RECOMENDACIONES') + (o.length ? lista(o) : p('Sin observaciones en el periodo.')) + p('Actas de recibo con la comunidad y/o el municipio: ' + (d.anexos.social?.length ? d.anexos.social.map(a => a.nombre).join(', ') : 'no se registraron en el periodo') + '.');
+  return titulo('3.  OBSERVACIONES Y RECOMENDACIONES') + (o.length ? lista(o) : p('Sin observaciones en el periodo.')) + p('Actas de recibo con la comunidad y/o el municipio: ' + (d.anexos.recibo?.length || cierres(d).length ? [...(d.anexos.recibo || []).map(a => a.nombre), ...cierres(d).map(a => 'acta de vecindad de cierre del predio ' + (a.predio || a.direccion || ''))].join(', ') : 'no se registraron en el periodo') + '.');
 }
 
+const cierres = d => (d.gs?.vecindad || []).filter(a => a.fecha_cierre && a.fecha_cierre >= d.ini && a.fecha_cierre <= d.fin);
 // Cada anexo relaciona los soportes adjuntos del mes (archivo, fecha y registro de origen) y los registros del periodo que respalda
-const ORIGEN = { ...NOMBRES_AMB,  ensayo: 'Ensayo', social: 'Gestión social', correspondencia: 'Correspondencia', bitacora: 'Bitácora', acta: 'Acta', otrosi: 'Otrosí', poliza: 'Póliza', suspension: 'Suspensión', tramo: 'Tramo', sst: 'SST', ambiental: 'Ambiental', pmt: 'PMT', gasto: 'Gasto', contrato: 'Contrato', proyecto: 'Proyecto' };
+const ORIGEN = { ...NOMBRES_AMB, ensayo: 'Ensayo', social: 'Gestión social', pqrs: 'PQRS', reunion: 'Reunión', acta_vecindad: 'Acta de vecindad', capacitacion: 'Cultura vial', afectacion: 'Afectación', encuesta: 'Encuesta', veeduria: 'Veeduría', correspondencia: 'Correspondencia', bitacora: 'Bitácora', acta: 'Acta', otrosi: 'Otrosí', poliza: 'Póliza', suspension: 'Suspensión', tramo: 'Tramo', sst: 'SST', ambiental: 'Ambiental', pmt: 'PMT', gasto: 'Gasto', contrato: 'Contrato', proyecto: 'Proyecto' };
 function soportes(a) {
   return tabla(['N.º', 'DOCUMENTO ADJUNTO', 'FECHA', 'REGISTRO DE ORIGEN', 'DESCRIPCIÓN'],
     (a || []).map((x, i) => [i + 1, x.nombre || '', fecha(x.fecha), `${ORIGEN[x.tabla] || x.tabla || '—'}${x.registro_id ? ' #' + x.registro_id : ''}`, x.descripcion || '']), [0.5, 3, 1.5, 1.8, 3], 'Sin documentos adjuntos en el periodo.');
@@ -394,8 +426,8 @@ function anexos(d) {
     subtitulo('ANEXO 1. REGISTRO FOTOGRÁFICO') + fotosTxt + cuadroAntesDespues(d.antes_despues || []) + cuadroFotos(d.fotos) +
     grupo(2, 'PLANOS', d.anexos.planos) +
     grupo(3, 'ENSAYOS DE LABORATORIO', d.anexos.ensayo, regs(d.ensayos.map(e => [fecha(e.fecha), e.ensayo || '', [e.item, e.abscisa].filter(Boolean).join(' · '), e.cumple || '', e.laboratorio || '']), ['FECHA', 'ENSAYO DEL PERIODO', 'ÍTEM / ABSCISA', 'CUMPLE', 'LABORATORIO'], [1.5, 3, 2, 1, 2])) +
-    grupo(4, 'ACTAS DE REUNIONES', d.anexos.social) +
-    grupo(5, 'ACTAS DE RECIBO DE LA COMUNIDAD Y/O MUNICIPIO', d.anexos.recibo) +
+    grupo(4, 'ACTAS DE REUNIONES', d.anexos.social, regs((d.gs?.reuniones || []).map(r => [fecha(r.fecha), r.tipo || '', [r.lugar, r.comunidad].filter(Boolean).join(' · '), r.asistentes ?? '', r.acta || 's/n', r.lista_asistencia || '']), ['FECHA', 'REUNIÓN DEL PERIODO', 'LUGAR / COMUNIDAD', 'ASISTENTES', 'ACTA', 'LISTA'], [1.4, 1.4, 2.6, 1, 1, 0.8])) +
+    grupo(5, 'ACTAS DE RECIBO DE LA COMUNIDAD Y/O MUNICIPIO', d.anexos.recibo, regs(cierres(d).map(a => [a.predio || '', [a.direccion, a.abscisa].filter(Boolean).join(' · '), fecha(a.fecha_cierre), a.danos || '', a.paz_y_salvo || '']), ['PREDIO', 'DIRECCIÓN / ABSCISA', 'ACTA DE VECINDAD DE CIERRE', 'DAÑOS', 'PAZ Y SALVO'], [1, 2.6, 1.8, 0.8, 1])) +
     grupo(6, 'CORRESPONDENCIA', d.anexos.correspondencia, regs(d.correspondencia.map(c => [fecha(c.fecha), c.radicado || '', c.sentido || '', [c.de, c.para].filter(Boolean).join(' → '), c.asunto || '', c.estado || '']), ['FECHA', 'RADICADO', 'SENTIDO', 'DE → PARA', 'ASUNTO', 'ESTADO'], [1.4, 1.4, 1.1, 2.2, 3.2, 1.1])) +
     grupo(7, 'BITÁCORA DE OBRA', d.anexos.bitacora, d.bitacora.length ? p(`La bitácora registra ${d.bitacora.length} anotación(es) entre el ${fecha(d.bitacora[0].fecha)} y el ${fecha(d.bitacora[d.bitacora.length - 1].fecha)}.`) : '') +
     grupo(8, 'OTROS', d.anexos.otros, (d.contratos.find(c => c.tipo === 'obra')?.balance_items?.length ? p('Balance de cantidades por ítem del contrato de obra:', { b: true }) + cuadroBalanceItems(d.contratos.find(c => c.tipo === 'obra')) : '') + externos) + anexoSST(d, 9) + anexoAmbiental(d, 10);
@@ -492,6 +524,45 @@ async function informeFormato(d, plantilla, generar = cuerpo) {
   return zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
+// ---------- Informe social mensual (PGS / fichas sociales del PAGA) ----------
+const TABLAS_SOCIALES = ['social', 'pqrs', 'reunion', 'acta_vecindad', 'mano_obra', 'capacitacion', 'afectacion', 'encuesta', 'veeduria'];
+function porFicha(d) {
+  const g = d.gs, n = {}, suma = (f, k) => { const c = f || 'Sin ficha'; (n[c] = n[c] || { pqrs: 0, reuniones: 0, vecindad: 0, cultura: 0, afectaciones: 0, otras: 0 })[k]++; };
+  g.pqrs_mes.filter(x => x.fecha >= d.ini).forEach(x => suma(x.ficha, 'pqrs'));
+  g.reuniones.forEach(x => suma(x.ficha, 'reuniones')); g.vecindad.forEach(x => suma(x.ficha, 'vecindad'));
+  g.capacitaciones.forEach(x => suma(x.ficha, 'cultura')); g.afectaciones.forEach(x => suma(x.ficha, 'afectaciones'));
+  [...g.encuestas, ...(g.social_mes || [])].forEach(x => suma(x.ficha, 'otras'));
+  if (g.mano_obra) suma(g.mano_obra.ficha, 'otras');
+  const nombre = c => d.fichas_social.find(f => f.codigo === c);
+  return tabla(['FICHA', 'PROGRAMA / PROYECTO', 'PQRS', 'REUNIONES', 'ACTAS VECINDAD', 'CULTURA VIAL', 'AFECTACIONES', 'OTRAS'],
+    Object.entries(n).map(([c, v]) => [c, nombre(c) ? `${nombre(c).programa} · ${nombre(c).nombre}` : '—', v.pqrs, v.reuniones, v.vecindad, v.cultura, v.afectaciones, v.otras]), [1.4, 3.6, 0.8, 1, 1, 1, 1.1, 0.8], 'Sin actividades sociales en el periodo.');
+}
+function cuerpoSocial(d) {
+  const g = d.gs, rec = g.pqrs_mes.filter(x => x.fecha >= d.ini), tipos = {};
+  for (const x of rec) tipos[x.tipo || 'Sin tipo'] = (tipos[x.tipo || 'Sin tipo'] || 0) + 1;
+  const resp = g.pqrs_mes.filter(x => x.fecha_respuesta && x.fecha_respuesta >= d.ini && x.fecha_respuesta <= d.fin);
+  const sop = (d.anexos.social || []), fotos = d.fotos.filter(f => TABLAS_SOCIALES.includes(f.tabla));
+  return [
+    p(`INFORME DE GESTIÓN SOCIAL No. ${d.numero}`, { b: true, centro: true, sz: 26, antes: 200 }),
+    p(`(PERIODO: DESDE ${fecha(d.ini).toUpperCase()} HASTA ${fecha(d.fin).toUpperCase()})`, { centro: true }),
+    p([['PROYECTO: ', { b: true }], d.proyecto.nombre || '—'], { centro: true, despues: 300 }),
+    titulo('1. ACTIVIDADES POR FICHA SOCIAL DEL PAGA'),
+    p('Fichas de los programas 6 a 10 de la Guía de Manejo Ambiental del INVÍAS (gestión social, patrimonio, predios y servicios, accesibilidad, y participación, gobernanza e inclusión).'), porFicha(d),
+    titulo('2. ATENCIÓN AL CIUDADANO: PQRS'),
+    ficha([['Recibidas en el mes', rec.length], ['Respondidas en el mes', resp.length], ['Vencidas sin respuesta', g.pqrs_mes.filter(x => x.semaforo === 'Vencida').length], ['Por tipo', Object.entries(tipos).map(([k, v]) => `${k}: ${v}`).join('\n') || '—']]),
+    gestionSocial(d),
+    titulo('3. ANEXOS Y SOPORTES DEL MES'),
+    lista([...g.reuniones.map(r => `Acta ${r.acta || 's/n'} de la reunión de ${String(r.tipo || '').toLowerCase()} del ${fecha(r.fecha)}${r.lista_asistencia === 'Sí' ? ' y lista de asistencia' : ''}`),
+      ...g.vecindad.map(a => `Acta de vecindad ${a.fecha_cierre && a.fecha_cierre >= d.ini ? 'de cierre' : 'de inicio'} del predio ${a.predio || a.direccion || ''}`),
+      ...rec.map(x => `PQRS ${x.radicado || 's/n'} (${x.tipo || ''}) y su respuesta`),
+      ...sop.map(a => `${a.nombre}${a.descripcion ? ' — ' + a.descripcion : ''}`)]),
+    p('Registro fotográfico social', { b: true, izq: true }), cuadroFotos(fotos),
+    firma(d.director, 'Director de interventoría'),
+  ].join('');
+}
+async function informeSocial(d) {
+  return informeFormato({ ...d, fotos: d.fotos.filter(f => TABLAS_SOCIALES.includes(f.tabla)) }, null, cuerpoSocial);
+}
 // ---------- Informe SST mensual del contratista (revisado por la interventoría) ----------
 const barra = (v, max) => '█'.repeat(max ? Math.round((v || 0) / max * 20) : 0) + ' ' + num(v);
 function cuerpoSST(d) {
@@ -608,5 +679,5 @@ function cuerpoAmbiental(d) {
 
 const informeAmbiental = d => informeFormato({ ...d, fotos: [], antes_despues: [], titulo_formato: 'INFORME AMBIENTAL DE OBRA (PAGA)' }, null, cuerpoAmbiental);
 
-module.exports = { informeFormato, informeSSTFormato, informeAmbiental, registrarAnexo };
+module.exports = { informeFormato, informeSSTFormato, informeAmbiental, informeSocial, registrarAnexo };
 
