@@ -3,17 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SIGI · Gestión de Interventoría</title>
+  <title>SIGI Pro</title>
+  <link rel="icon" href="icono.png">
   <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
   <header class="barra-titulo">
-    <div class="logo">SI</div>
+    <div class="marca"><img src="logo.svg" alt=""><b>SIGI</b><span>Pro</span></div>
     <label class="selector">Proyecto:
       <select id="sel-proyecto"></select>
     </label>
-    <div class="titulo">SIGI · Sistema Integral de Gestión de Interventoría</div>
+    <div class="titulo">Sistema Integral de Gestión de Interventoría</div>
     <div class="fecha" id="hoy"></div>
+    <button class="ayuda" id="btn-acerca" title="Acerca de SIGI Pro">?</button>
   </header>
 
   <nav class="cinta">
@@ -42,7 +44,7 @@
   </main>
 
   <footer class="barra-estado">
-    <span id="estado-version">SIGI 0.1</span>
+    <span id="estado-version">SIGI Pro</span>
     <span id="estado-proyecto"></span>
     <span id="estado-mensaje" class="mensaje"></span>
     <span class="zoom">Zoom <input type="range" id="zoom" min="80" max="130" value="100"></span>

@@ -18,7 +18,7 @@ if (!db.prepare('SELECT COUNT(*) n FROM proyecto').get().n) require('./seed/cucu
 
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
-  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id',
+  proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', gasto: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id',
 };
@@ -75,6 +75,25 @@ function detalleActa(actaId) {
   };
 }
 
+// Control de costos del contrato propio: por ítem, presupuestado vs gastado real vs facturado (cuentas de cobro aprobadas)
+function costos(contratoId) {
+  const { contrato: c, items, totales: tp } = presupuesto(contratoId);
+  const gastado = new Map(db.prepare('SELECT item_id, SUM(valor) v FROM gasto WHERE contrato_id = ? GROUP BY item_id').all(contratoId).map(r => [r.item_id, r.v]));
+  const facturado = new Map(db.prepare(`SELECT ai.item_id, SUM(ai.cant_aprobada) q FROM acta_item ai JOIN acta a ON a.id = ai.acta_id
+    WHERE a.contrato_id = ? GROUP BY ai.item_id`).all(contratoId).map(r => [r.item_id, r.q]));
+  const filas = items.map(it => {
+    if (it.tipo !== 1) return { ...it };
+    const pres = it.cantidad * it.vr_unitario, gas = gastado.get(it.id) || 0, fac = (facturado.get(it.id) || 0) * it.vr_unitario;
+    return { ...it, presupuestado: r2(pres), gastado: r2(gas), facturado: r2(fac), saldo: r2(pres - gas), margen: r2(fac - gas), pct: pres ? gas / pres : 0 };
+  });
+  const s = k => r2(filas.filter(f => f.tipo === 1).reduce((t, f) => t + f[k], 0));
+  const sinItem = r2(gastado.get(null) || 0);
+  const cdFacturado = s('facturado');
+  return { contrato: c, filas, sin_item: sinItem,
+    totales: { presupuestado: s('presupuestado'), gastado: r2(s('gastado') + sinItem), facturado_cd: cdFacturado,
+      facturado_total: totales(c, cdFacturado).total, valor_contrato: tp.total } };
+}
+
 function resumen(proyectoId) {
   const p = db.prepare('SELECT * FROM proyecto WHERE id = ?').get(proyectoId);
   const contratos = db.prepare('SELECT * FROM contrato WHERE proyecto_id = ? ORDER BY tipo').all(proyectoId).map(c => {
@@ -84,7 +103,8 @@ function resumen(proyectoId) {
       return { ...a, valor: d.totales.acta.total, acumulado: d.totales.acumulado.total };
     });
     const ejecutado = actas.length ? actas[actas.length - 1].acumulado : 0;
-    return { ...c, presupuesto: pr.totales.total, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado };
+    const gastado = db.prepare('SELECT COALESCE(SUM(valor), 0) v FROM gasto WHERE contrato_id = ?').get(c.id).v;
+    return { ...c, presupuesto: pr.totales.total, costo_directo: pr.totales.costo_directo, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado, gastado };
   });
   const hoy = new Date().toISOString().slice(0, 10);
   const vencimientos = db.prepare(`SELECT * FROM vencimiento WHERE proyecto_id = ? AND estado <> 'Cumplido'
@@ -141,6 +161,7 @@ async function api(req, res, url) {
 
   if (r0 === 'resumen') return enviar(res, 200, resumen(Number(r1)));
   if (r0 === 'presupuesto') return enviar(res, 200, presupuesto(Number(r1)));
+  if (r0 === 'costos') return enviar(res, 200, costos(Number(r1)));
   if (r0 === 'memoria') return enviar(res, 200, memoria(Number(r1), q.buscar));
 
   if (r0 === 'acta' && req.method === 'GET' && r2_ === 'csv') {
@@ -191,7 +212,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, db.prepare(`SELECT * FROM ${tabla} WHERE id = ?`).get(id) || null);
       const filtro = padre && q[padre] ? ` WHERE ${padre} = ?` : '';
-      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC' }[tabla] || 'id';
+      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC' }[tabla] || 'id';
       return enviar(res, 200, db.prepare(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`).all(...(filtro ? [Number(q[padre])] : [])));
     }
     if (req.method === 'POST') {

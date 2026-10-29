@@ -20,7 +20,17 @@ button, input, select, textarea { font: inherit; }
 
 /* Barra de título */
 .barra-titulo { background: var(--azul); color: #fff; display: flex; align-items: center; gap: 14px; padding: 6px 12px; min-height: 38px; }
-.logo { width: 24px; height: 24px; border-radius: 4px; background: #fff; color: var(--azul); font-weight: 700; display: grid; place-items: center; font-size: 11px; }
+.marca { display: flex; align-items: center; gap: 7px; font-size: 17px; padding-right: 14px; border-right: 1px solid rgba(255,255,255,.25); }
+.marca img { width: 26px; height: 26px; }
+.marca b { letter-spacing: .5px; }
+.marca span { color: #ffc83d; font-weight: 300; margin-left: -3px; }
+.ayuda { width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,.6); background: none; color: #fff; cursor: pointer; font-weight: 700; }
+.ayuda:hover { background: rgba(255,255,255,.15); }
+.acerca { display: flex; gap: 20px; align-items: center; }
+.acerca img { width: 84px; height: 84px; }
+.acerca h3 { font-size: 24px; margin: 0; }
+.acerca h3 span { color: var(--ambar); font-weight: 300; }
+.acerca p { margin: 3px 0; color: var(--tenue); }
 .selector select { margin-left: 6px; min-width: 260px; padding: 2px 4px; border-radius: 3px; border: 0; }
 .titulo { flex: 1; text-align: center; opacity: .85; }
 .fecha { opacity: .85; }
@@ -34,7 +44,7 @@ button, input, select, textarea { font: inherit; }
 .grupo { display: flex; flex-direction: column; border-right: 1px solid #e3e3e3; padding: 0 8px; }
 .grupo-botones { display: flex; gap: 2px; flex: 1; }
 .grupo-nombre { text-align: center; color: var(--tenue); font-size: 11px; padding-top: 2px; }
-.btn-cinta { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; width: 72px; padding: 4px 2px; background: none; border: 1px solid transparent; border-radius: 3px; cursor: pointer; font-size: 11.5px; line-height: 1.15; text-align: center; }
+.btn-cinta { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; min-width: 68px; max-width: 104px; padding: 4px 6px; background: none; border: 1px solid transparent; border-radius: 3px; cursor: pointer; font-size: 11.5px; line-height: 1.15; text-align: center; }
 .btn-cinta:hover:not(:disabled) { background: var(--azul-claro); border-color: #b9cfea; }
 .btn-cinta:disabled { opacity: .4; cursor: default; }
 .btn-cinta svg { width: 30px; height: 30px; }
@@ -48,6 +58,10 @@ button, input, select, textarea { font: inherit; }
 .nodo { padding: 3px 8px 3px calc(8px + var(--nivel, 0) * 16px); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
 .nodo:hover { background: var(--azul-claro); }
 .nodo.activo { background: var(--sel); }
+.seccion { font-size: 11px; font-weight: 700; letter-spacing: .4px; padding: 6px 10px; margin: 8px 0 4px; color: #fff; border-radius: 3px; }
+.arbol .seccion { margin: 10px 6px 4px; }
+.seccion.obra { background: #2e7d32; }
+.seccion.interv { background: var(--azul); }
 .nodo .cuenta { margin-left: auto; color: var(--tenue); font-size: 11px; }
 .nodo.carpeta { font-weight: 600; }
 

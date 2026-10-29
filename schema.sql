@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS acta_item (
   PRIMARY KEY (acta_id, item_id)
 );
 
+-- Costos reales del contrato propio (interventoría): nómina, arriendo, vehículo, laboratorio...
+CREATE TABLE IF NOT EXISTS gasto (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL REFERENCES contrato(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE SET NULL,  -- ítem del presupuesto al que se carga
+  fecha TEXT,
+  descripcion TEXT,
+  proveedor TEXT,
+  documento TEXT,           -- factura, cuenta de cobro, planilla
+  valor REAL DEFAULT 0,
+  pagado TEXT DEFAULT 'No'
+);
+
 CREATE TABLE IF NOT EXISTS vencimiento (
   id INTEGER PRIMARY KEY,
   proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
