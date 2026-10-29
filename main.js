@@ -7,7 +7,9 @@ app.setAppUserModelId('co.simo.sigi');
 
 // Los datos quedan en %APPDATA%\SIGI Pro (o en .\datos si se corre desde el código)
 process.env.SIGI_DATOS = app.isPackaged ? path.join(app.getPath('userData'), 'datos') : path.join(__dirname, 'datos');
-process.env.PORT = '0';
+// Puerto fijo (4027) para que Power BI y otros programas siempre encuentren los datos; si está ocupado, uno libre
+process.env.PORT = '4027';
+process.env.SIGI_PUERTO_LIBRE = '1';
 const ICONO = path.join(__dirname, 'build', 'icono.ico');
 
 let ventana;

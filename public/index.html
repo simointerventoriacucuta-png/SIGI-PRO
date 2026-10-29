@@ -10,12 +10,16 @@
 <body>
   <header class="barra-titulo">
     <div class="marca"><img src="logo.svg" alt=""><b>SIGI</b><span>Pro</span></div>
-    <label class="selector">Proyecto:
-      <select id="sel-proyecto"></select>
-    </label>
-    <div class="titulo">Sistema Integral de Gestión de Interventoría</div>
-    <div class="fecha" id="hoy"></div>
-    <button class="cab-btn" id="btn-buscar" title="Buscar en el proyecto (Ctrl+K)">🔍 Buscar <kbd>Ctrl+K</kbd></button>
+    <div class="acceso-rapido">
+      <button id="btn-actualizar" title="Actualizar (F5)">⟳</button>
+      <button id="btn-inicio-rapido" title="Tablero">⌂</button>
+      <button id="btn-captura" title="Capturar avance de obra con fotos">📷</button>
+      <button id="btn-doc-ia" title="Subir un documento u hoja y que la IA registre lo que dice">📄</button>
+    </div>
+    <div class="titulo" id="titulo-ventana">SIGI Pro</div>
+    <button class="caja-buscar" id="btn-buscar" title="Buscar en el proyecto (Ctrl+K)"><span>⌕</span> Buscar <kbd>Ctrl+K</kbd></button>
+    <span class="esp"></span>
+    <button class="cab-btn" id="btn-asistente" title="Asistente de IA (Ctrl+J)">✦ Asistente</button>
     <button class="cab-btn" id="btn-campana" title="Avisos de los próximos 7 días">🔔<span id="campana-n" class="globo" hidden></span></button>
     <button class="cab-btn" id="btn-usuario" title="Cambiar de usuario">👤 <span id="usuario-nombre">Sin usuario</span></button>
     <button class="ayuda" id="btn-acerca" title="Acerca de SIGI Pro">?</button>
@@ -25,7 +29,14 @@
   <nav class="cinta">
     <div class="pestanas-cinta" id="pestanas-cinta"></div>
     <div class="grupos-cinta" id="grupos-cinta"></div>
+    <button class="plegar-cinta" id="plegar-cinta" title="Contraer o mostrar la cinta">⌃</button>
   </nav>
+  <div class="barra-proyecto">
+    <label class="selector" title="Proyecto activo"><select id="sel-proyecto"></select></label>
+    <span class="separador">⋮</span><i class="fx">fx</i>
+    <div class="ruta" id="ruta-doc"></div>
+  </div>
+  <div class="menu-archivo" id="menu-archivo" hidden></div>
 
   <main class="area">
     <aside class="explorador">
@@ -53,6 +64,7 @@
     <span id="estado-proyecto"></span>
     <span id="estado-mensaje" class="mensaje"></span>
     <span id="estado-sync" class="sync local"></span>
+    <span class="fecha" id="hoy"></span>
     <span class="zoom">Zoom <input type="range" id="zoom" min="80" max="130" value="100"></span>
   </footer>
 

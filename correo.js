@@ -1,6 +1,7 @@
 // SIGI Pro - lectura de correos de Gmail por IMAP (imap.gmail.com:993, TLS) con contraseña de aplicación.
 // La configuración (incluida la contraseña) se guarda SOLO en este equipo: datos/correo.json.
-// Cada correo nuevo crea un registro en correspondencia y sus adjuntos van a la tabla adjunto.
+// Cada correo nuevo crea un registro en correspondencia y sus adjuntos van a adjunto + adjunto_dato (sincronizados con Turso).
+// La IA (opcional) se inyecta desde server.js: usa proveedores.js (Gemini) con la configuración del asistente.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,36 +13,9 @@ function radicadoDe(asunto) {
   const m = String(asunto || '').match(/\b(?:rad(?:icado)?|oficio)\.?\s*(?:n[o°º.]*\.?\s*)?[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]{2,})/i);
   return m ? m[1].replace(/[.\-\/]+$/, '') : null;
 }
-// Suma días hábiles (lunes a viernes; no descuenta festivos de Colombia)
-function diasHabiles(desde, n) {
-  const d = new Date(desde + 'T00:00:00Z');
-  let k = 0;
-  while (k < n) { d.setUTCDate(d.getUTCDate() + 1); const s = d.getUTCDay(); if (s !== 0 && s !== 6) k++; }
-  return d.toISOString().slice(0, 10);
-}
 const seguro = s => String(s || 'adjunto').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 120);
 
-// Análisis con Gemini (API REST generateContent). Devuelve { resumen, requiere_respuesta, dias_habiles, vencimientos: [{fecha|dias_habiles, descripcion, tipo}] }
-async function analizarGemini(clave, c) {
-  const texto = `Eres asistente de una interventoría de obras viales en Colombia. Lee este correo y responde SOLO JSON con:
-{"resumen": "máx. 3 frases", "requiere_respuesta": true|false, "dias_habiles": número de días hábiles para responder o null,
- "vencimientos": [{"descripcion": "...", "tipo": "Respuesta|Entrega|Visita|Pago|Póliza|Otro", "fecha": "AAAA-MM-DD" o null, "dias_habiles": número o null}]}
-Si el correo no fija plazo pero es un derecho de petición, usa 15 días hábiles (Ley 1755 de 2015). No inventes fechas.
-Fecha del correo: ${c.fecha}
-De: ${c.de}
-Asunto: ${c.asunto}
-Cuerpo:
-${String(c.texto || '').slice(0, 12000)}`;
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: texto }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.2 } }),
-  });
-  if (!r.ok) throw new Error('Gemini respondió ' + r.status);
-  const d = await r.json();
-  return JSON.parse(d.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '{}');
-}
-
-function crearCorreo({ db, datos, auditar, claveIA, crearCliente, analizar }) {
+function crearCorreo({ db, datos, auditar, crearCliente, analizar }) {
   const ARCHIVO = path.join(datos, 'correo.json');
   const estado = { revisando: false, ultima: null, nuevos: 0, error: null, timer: null };
 
@@ -70,30 +44,24 @@ function crearCorreo({ db, datos, auditar, claveIA, crearCliente, analizar }) {
     const de = m.from?.text || '', para = m.to?.text || '', asunto = m.subject || '(sin asunto)';
     const r = await db.run(`INSERT INTO correspondencia (proyecto_id, fecha, sentido, radicado, de, para, asunto, estado, origen, message_id) VALUES (?,?,?,?,?,?,?,?,?,?)`,
       cfg.proyecto_id, fecha, 'Recibida', radicadoDe(asunto), de, para, asunto, 'Abierta', 'Gmail', mid);
-    const adj = [];
-    const dir = path.join(datos, 'adjuntos', 'correspondencia', String(r.id));
+    const adj = [], ahora = new Date().toISOString();
     for (const a of m.attachments || []) {
-      if (a.related) continue; // imágenes incrustadas en el cuerpo
-      fs.mkdirSync(dir, { recursive: true });
-      let nombre = seguro(a.filename), k = 1;
-      while (fs.existsSync(path.join(dir, nombre))) nombre = `${k++}_${seguro(a.filename)}`;
-      fs.writeFileSync(path.join(dir, nombre), a.content);
-      await db.run('INSERT INTO adjunto (tabla, registro_id, nombre, tipo, tamano, ruta, fecha) VALUES (?,?,?,?,?,?,?)',
-        'correspondencia', r.id, nombre, a.contentType || null, a.size || a.content?.length || 0, path.relative(datos, path.join(dir, nombre)), new Date().toISOString());
-      adj.push(nombre);
+      if (a.related || !a.content?.length) continue; // imágenes incrustadas en el cuerpo
+      if (a.content.length > 20 * 1024 * 1024) continue; // mismo límite que los adjuntos subidos a mano
+      const nombre = seguro(a.filename), mime = a.contentType || 'application/octet-stream';
+      const ra = await db.run(`INSERT INTO adjunto (proyecto_id, tabla, registro_id, categoria, nombre, tipo_mime, tamano, fecha, descripcion, usuario, creado) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        cfg.proyecto_id, 'correspondencia', r.id, /^image\//.test(mime) ? 'Foto' : 'Documento', nombre, mime, a.content.length, fecha, `Adjunto del correo: ${asunto}`.slice(0, 300), 'Gmail (automático)', ahora);
+      await db.run('INSERT INTO adjunto_dato (adjunto_id, datos) VALUES (?, ?)', ra.id, a.content);
+      adj.push({ nombre, mime, contenido: a.content });
     }
-    if (adj.length) await db.run('UPDATE correspondencia SET archivo = ? WHERE id = ?', adj.join(', '), r.id);
-    await auditar(USUARIO_AUTO, 'correspondencia', r.id, 'importar', { message_id: mid, de, asunto, adjuntos: adj });
+    if (adj.length) await db.run('UPDATE correspondencia SET archivo = ? WHERE id = ?', adj.map(a => a.nombre).join(', '), r.id);
+    await auditar(USUARIO_AUTO, 'correspondencia', r.id, 'importar', { message_id: mid, de, asunto, adjuntos: adj.map(a => a.nombre) });
     // IA: solo sugerencias; los vencimientos se crean cuando el usuario confirma
-    const clave = claveIA();
-    if (clave || analizar) {
+    if (analizar) {
       try {
-        const s = await (analizar || analizarGemini)(clave, { fecha, de, asunto, texto: m.text || '' });
-        const venc = (s.vencimientos || []).map(v => ({ descripcion: String(v.descripcion || asunto), tipo: v.tipo || 'Respuesta', fecha: v.fecha || (v.dias_habiles ? diasHabiles(fecha, Number(v.dias_habiles)) : null) }));
-        const resp = s.requiere_respuesta ? 'Sí' : 'No';
-        const plazo = s.requiere_respuesta && s.dias_habiles ? diasHabiles(fecha, Number(s.dias_habiles)) : null;
-        await db.run('UPDATE correspondencia SET resumen_ia = ?, vencimientos_ia = ?, requiere_respuesta = ?, plazo = ? WHERE id = ?',
-          String(s.resumen || ''), venc.length ? JSON.stringify(venc) : null, resp, plazo, r.id);
+        const s = await analizar({ proyecto_id: cfg.proyecto_id, fecha, de, para, asunto, texto: m.text || '', adjuntos: adj });
+        if (s) await db.run('UPDATE correspondencia SET resumen_ia = ?, vencimientos_ia = ?, requiere_respuesta = COALESCE(?, requiere_respuesta), plazo = COALESCE(?, plazo), radicado = COALESCE(radicado, ?) WHERE id = ?',
+          s.resumen || null, s.vencimientos?.length ? JSON.stringify(s.vencimientos) : null, s.requiere_respuesta ?? null, s.plazo || null, s.radicado || null, r.id);
       } catch (e) { console.error('IA del correo:', e.message); }
     }
     return r.id;
@@ -175,4 +143,4 @@ function crearCorreo({ db, datos, auditar, claveIA, crearCliente, analizar }) {
   return { leer, publica, guardar, probar, revisar, programar, registrar, conClave, estado };
 }
 
-module.exports = { crearCorreo, radicadoDe, diasHabiles, analizarGemini };
+module.exports = { crearCorreo, radicadoDe };
