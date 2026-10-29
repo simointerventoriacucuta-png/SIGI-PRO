@@ -317,6 +317,160 @@ CREATE TABLE IF NOT EXISTS pmt (
   notas TEXT
 );
 
+-- Anexos ambientales (Guía de Manejo Ambiental de Proyectos de Infraestructura del INVÍAS, PAGA del contrato)
+-- Catálogo de fichas del PAGA con su indicador, meta y periodicidad
+CREATE TABLE IF NOT EXISTS amb_ficha (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  programa TEXT,
+  codigo TEXT,                    -- p. ej. PAC-2.1, PGH-3.1
+  nombre TEXT,
+  indicador TEXT,
+  meta REAL,
+  unidad TEXT,
+  periodicidad TEXT,              -- Diaria, Semanal, Mensual, Trimestral, Única
+  responsable TEXT,
+  presupuesto REAL,               -- presupuesto PAGA programado de la ficha
+  ejecutado REAL,                 -- ejecutado acumulado
+  notas TEXT                      -- avances y modificaciones de la ficha en el PAGA
+);
+
+-- Matriz de requisitos legales ambientales
+CREATE TABLE IF NOT EXISTS amb_requisito (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  norma TEXT,
+  emisor TEXT,
+  lineamiento TEXT,
+  ficha TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  evidencia TEXT
+);
+
+-- Permisos ambientales y fuentes de materiales (Decreto 1076 de 2015; Ley 685 de 2001)
+CREATE TABLE IF NOT EXISTS amb_permiso (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  tipo TEXT,                      -- Aprovechamiento forestal, Ocupación de cauce, Concesión de aguas, Vertimientos, Fuente de materiales, Sitio de disposición de RCD, Emisiones atmosféricas
+  autoridad TEXT,                 -- CAR o autoridad ambiental
+  acto TEXT,                      -- resolución o auto
+  fecha TEXT,
+  vence TEXT,
+  titular TEXT,
+  titulo_minero TEXT,             -- fuentes de materiales: título minero o RUCOM
+  autorizado TEXT,                -- caudal, volumen o individuos autorizados
+  obligaciones TEXT,
+  estado TEXT DEFAULT 'En trámite'
+);
+
+-- Residuos de construcción y demolición (Res. 1257 de 2021)
+CREATE TABLE IF NOT EXISTS rcd (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  tipo TEXT,                      -- Aprovechable, No aprovechable, Peligroso
+  generado REAL,
+  aprovechado REAL,
+  dispuesto REAL,
+  unidad TEXT DEFAULT 't',
+  sitio TEXT,                     -- gestor, punto limpio o sitio de disposición final autorizado
+  certificado TEXT,               -- certificado o manifiesto del gestor
+  notas TEXT
+);
+
+-- Inventario forestal y compensación
+CREATE TABLE IF NOT EXISTS forestal (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  codigo TEXT,
+  especie TEXT,
+  nombre_comun TEXT,
+  abscisa TEXT,
+  dap REAL,                       -- diámetro a la altura del pecho, cm
+  altura REAL,
+  volumen REAL,                   -- m³
+  tratamiento TEXT,               -- Conservar, Poda, Tala, Bloqueo y traslado
+  permiso TEXT,
+  compensar REAL,                 -- individuos a sembrar
+  sembrados REAL,
+  estado TEXT DEFAULT 'Inventariado'
+);
+
+-- Consumo de agua por fuente
+CREATE TABLE IF NOT EXISTS agua (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  fuente TEXT,
+  uso TEXT,
+  volumen REAL,                   -- m³
+  permiso TEXT,
+  notas TEXT
+);
+
+-- Maquinaria y vehículos: mantenimiento, emisiones y aceites usados
+CREATE TABLE IF NOT EXISTS maquinaria (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  equipo TEXT,
+  placa TEXT,
+  ultimo_mtto TEXT,
+  proximo_mtto TEXT,
+  emisiones TEXT,                 -- certificado de revisión técnico-mecánica y de emisiones
+  vence_emisiones TEXT,
+  aceite REAL,                    -- galones de aceite usado entregados
+  gestor_aceite TEXT,
+  cumple TEXT DEFAULT 'Pendiente',
+  notas TEXT
+);
+
+-- Monitoreos ambientales (ruido, aire, agua)
+CREATE TABLE IF NOT EXISTS monitoreo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  tipo TEXT,
+  punto TEXT,
+  parametro TEXT,
+  resultado REAL,
+  limite REAL,
+  unidad TEXT,
+  norma TEXT,
+  laboratorio TEXT,
+  cumple TEXT DEFAULT 'Pendiente'
+);
+
+-- Lista de chequeo ambiental de obra
+CREATE TABLE IF NOT EXISTS amb_chequeo (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  aspecto TEXT,
+  cumple TEXT DEFAULT 'Sí',
+  observacion TEXT,
+  accion TEXT,
+  plazo TEXT,
+  estado TEXT DEFAULT 'Abierto'
+);
+
+-- Inspecciones al PMT y estado de los dispositivos (Manual de Señalización Vial, cap. 4)
+CREATE TABLE IF NOT EXISTS pmt_inspeccion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  fecha TEXT,
+  frente TEXT,
+  dispositivo TEXT,
+  requeridos REAL,
+  instalados REAL,
+  condicion TEXT,                 -- Buena, Regular, Mala
+  cumple TEXT DEFAULT 'Sí',
+  observacion TEXT,
+  accion TEXT
+);
+
 -- Gestión social: fichas del PGS (atención a la comunidad, divulgación, predios, mano de obra local, cultura vial)
 CREATE TABLE IF NOT EXISTS social (
   id INTEGER PRIMARY KEY,
