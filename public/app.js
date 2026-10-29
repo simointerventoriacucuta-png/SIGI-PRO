@@ -130,7 +130,9 @@ const CINTA = {
   control: ['Control de obra', [
     ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')], ['Matriz de peligros', 'datos', () => abrir('tabla:sst_peligro')], ['Listas de chequeo', 'ensayo', () => abrir('tabla:sst_inspeccion')], ['Informe SST (Word)', 'acta', () => informeSST()]]],
     ['Anexos SST', [['Permisos y ATS', 'acta', () => abrir('tabla:sst_permiso')], ['Capacitaciones', 'correo', () => abrir('tabla:sst_capacitacion')], ['Trabajadores', 'personal', () => abrir('tabla:sst_trabajador')], ['Entrega de EPP', 'poliza', () => abrir('tabla:sst_epp')], ['PILA / ARL', 'gasto', () => abrir('tabla:sst_seguridad_social')], ['Investigación AT', 'vencimiento', () => abrir('tabla:sst_investigacion')], ['Emergencias', 'balance', () => abrir('tabla:sst_emergencia')], ['Maquinaria', 'costos', () => abrir('tabla:sst_equipo')], ['Comités y cronograma', 'datos', () => abrir('tabla:sst_actividad')], ['Soportes del informe', 'presupuesto', () => abrir('tabla:sst_documento')]]],
-    ['Ambiental', [['Fichas PAGA / PMA', 'ensayo', () => abrir('tabla:ambiental')], ['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')]]],
+    ['Ambiental', [['Fichas PAGA', 'ensayo', () => abrir('tabla:amb_ficha')], ['Requisitos legales', 'poliza', () => abrir('tabla:amb_requisito')], ['Informe ambiental', 'informe', () => informeMensual('informe-ambiental')], ['Seguimiento', 'ensayo', () => abrir('tabla:ambiental')], ['Permisos', 'vencimiento', () => abrir('tabla:amb_permiso')], ['RCD', 'balance', () => abrir('tabla:rcd')], ['Forestal', 'ensayo', () => abrir('tabla:forestal')]]],
+    ['Recursos y control ambiental', [['Agua', 'balance', () => abrir('tabla:agua')], ['Maquinaria', 'personal', () => abrir('tabla:maquinaria')], ['Monitoreos', 'ensayo', () => abrir('tabla:monitoreo')], ['Chequeo', 'ensayo', () => abrir('tabla:amb_chequeo')]]],
+    ['PMT', [['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')], ['Inspección PMT', 'vencimiento', () => abrir('tabla:pmt_inspeccion')]]],
     ['Social', [['Gestión social (PGS) y PQRS', 'correo', () => abrir('tabla:social')]]],
   ]],
   informes: ['Informes', [
@@ -192,7 +194,7 @@ function pintarArbol() {
     h += n('', '📁 Actas parciales', 0, ob.actas.length, true) + ob.actas.map(a => n('acta:' + a.id, `Acta ${a.numero}`, 1, a.estado)).join('');
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('avances', '📍 Capturas de avance', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
-    h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:ambiental', 'Fichas PAGA / PMA', 1) + n('tabla:pmt', 'PMT (tránsito)', 1)
+    h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:amb_ficha', 'Fichas del PAGA', 1) + n('tabla:amb_requisito', 'Requisitos legales', 1) + n('tabla:ambiental', 'Seguimiento a fichas', 1) + n('tabla:amb_permiso', 'Permisos ambientales', 1) + n('tabla:rcd', 'RCD', 1) + n('tabla:forestal', 'Forestal y compensación', 1) + n('tabla:agua', 'Consumo de agua', 1) + n('tabla:maquinaria', 'Maquinaria y emisiones', 1) + n('tabla:monitoreo', 'Monitoreos', 1) + n('tabla:amb_chequeo', 'Lista de chequeo', 1) + n('tabla:pmt', 'PMT (tránsito)', 1) + n('tabla:pmt_inspeccion', 'Inspecciones al PMT', 1)
       + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
       + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1)
       + SST_ANEXOS.map(t => n('tabla:' + t, TABLAS[t].titulo.replace('SST · ', ''), 1)).join('');
@@ -224,7 +226,7 @@ function tituloDoc(k) {
 function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
-  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'control'])), ambiental: 'control', pmt: 'control', social: 'control' }[x];
+  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'control'])), ambiental: 'control', pmt: 'control', ...Object.fromEntries(AMB_TABLAS.map(t => [t, 'control'])), social: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
   if (t === 'requisiciones' || t === 'rq') return 'interventoria';
@@ -1150,7 +1152,7 @@ async function subirArchivos(lista, tabla, registroId) {
 async function dialogoAdjuntos(tabla, id) {
   const pintar = async () => {
     const lista = await api(`adjuntos/${E.pid}?tabla=${tabla}&registro_id=${id}`);
-    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', ...SST_ANEXOS, 'ambiental', 'social', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
+    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', ...SST_ANEXOS, 'ambiental', 'social', 'pmt', ...AMB_TABLAS, 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
       <div class="adjuntos">${lista.map(miniatura).join('') || '<p class="sub">Aún no hay archivos. También puede arrastrarlos a esta ventana.</p>'}</div>
       <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
     const caja = $('#dialogo-form');
@@ -1352,10 +1354,11 @@ async function aprobarTodo() {
   if (!confirm('¿Copiar las cantidades presentadas como aprobadas en todos los ítems de esta acta?')) return;
   await api(`acta/${E.activo.split(':')[1]}/aprobar-todo`, 'POST'); await refrescar(); aviso('Cantidades aprobadas');
 }
-function informeMensual() {
+function informeMensual(ruta) {
+  if (typeof ruta !== 'string') ruta = 'informe';
   const mes = prompt('Mes del informe (AAAA-MM):', new Date().toISOString().slice(0, 7)); if (!mes) return;
   if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
-  location.href = `/api/docx/informe/${E.pid}?mes=${mes.trim()}`;
+  location.href = `/api/docx/${ruta}/${E.pid}?mes=${mes.trim()}`;
 }
 async function copiarAnterior() {
   if (!confirm('¿Copiar las cantidades aprobadas del acta anterior a los ítems que en esta acta aún están en cero?')) return;
@@ -1433,7 +1436,7 @@ async function vCostos(cont, cid) {
 const ESTADOS = { vencimiento: 'Pendiente|En trámite|Cumplido|Vencido', personal: 'Propuesto|Aprobado|Vinculado|Por vincular|Retirado',
   poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada',
   sst: 'Abierto|En seguimiento|Cerrado', sst_peligro: 'Abierto|En seguimiento|Cerrado', sst_inspeccion: 'Abierto|En seguimiento|Cerrado', sst_permiso: 'Abierto|Cerrado|Suspendido',
-  sst_capacitacion: 'Programada|Realizada|Cancelada', sst_trabajador: 'Activo|Retirado', sst_investigacion: 'Abierto|En seguimiento|Cerrado', sst_emergencia: 'Abierto|Cerrado', sst_equipo: 'Operativo|Fuera de servicio|Retirado', sst_actividad: 'Programada|Ejecutada|Cancelada', sst_documento: 'Cargado|Pendiente|No aplica', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+  sst_capacitacion: 'Programada|Realizada|Cancelada', sst_trabajador: 'Activo|Retirado', sst_investigacion: 'Abierto|En seguimiento|Cerrado', sst_emergencia: 'Abierto|Cerrado', sst_equipo: 'Operativo|Fuera de servicio|Retirado', sst_actividad: 'Programada|Ejecutada|Cancelada', sst_documento: 'Cargado|Pendiente|No aplica', ambiental: 'Abierto|En seguimiento|Cerrado', amb_chequeo: 'Abierto|En seguimiento|Cerrado', amb_permiso: 'En trámite|Vigente|Vencido|Negado|Cerrado', forestal: 'Inventariado|Autorizado|Intervenido|Compensado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
 // Anexos de SST y preguntas de las listas de chequeo (C cumple, NC no cumple, NA no aplica)
 const SST_ANEXOS = ['sst_peligro', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_trabajador', 'sst_epp', 'sst_seguridad_social', 'sst_investigacion', 'sst_emergencia', 'sst_equipo', 'sst_actividad', 'sst_documento'];
 const ANEXOS_SST = ['Afiliaciones', 'Exámenes médicos ocupacionales', 'Inducciones y evaluaciones', 'Entrega de EPP y dotación', 'Notificación de riesgos', 'Exámenes de retiro', 'Paz y salvos', 'Preoperacionales', 'Charlas y capacitaciones', 'Inspecciones', 'Licencia de salud ocupacional', 'Certificación de pagos (revisor fiscal)', 'Planillas de seguridad social del mes', 'Actas COPASST y COCOLA', 'Certificado ARL de accidentalidad', 'Personal administrativo', 'Matriz de peligros', 'Plan de trabajo anual SST', 'Plan de emergencias', 'Inspecciones programadas y gestión documental', 'Evidencia fotográfica', 'Aprobación del informe por la interventoría'];
@@ -1468,8 +1471,10 @@ function informeSST() {
   const mes = prompt('Mes del informe SST (AAAA-MM)', hoyISO().slice(0, 7));
   if (mes && /^\d{4}-\d{2}$/.test(mes)) location.href = `/api/docx/informe-sst/${E.pid}?mes=${mes}`;
 }
-const PROGRAMAS_AMB = 'Desarrollo y aplicación de la gestión ambiental (DAGA)|Actividades constructivas|Gestión hídrica|Biótico (flora y fauna)|Instalaciones temporales, maquinaria y equipos|Gestión social|Seguridad y salud en el trabajo';
 const CLIMA = { Seco: '☀️', Nublado: '⛅', 'Lluvia intermitente': '🌦️', Lluvia: '🌧️', Tormenta: '⛈️' };
+const AMB_TABLAS = ['amb_ficha', 'amb_requisito', 'amb_permiso', 'rcd', 'forestal', 'agua', 'maquinaria', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion'];
+const PROGRAMAS_AMB = '1. Desarrollo y aplicación de la gestión ambiental (DAGA)|2. Actividades constructivas (PAC)|3. Gestión hídrica (PGH)|4. Biótico y servicios ecosistémicos (PBSE)|5. Manejo de instalaciones temporales, maquinaria y equipos (PMIT)|6. Desarrollo local (PDL)|7. Patrimonio (PPSI)|8. Predios y servicios (PGS)|9. Accesibilidad (PA)|10. Participación, gobernanza e inclusión (PPGI)';
+const ASPECTOS_AMB = 'Señalización y aislamiento del frente|Acopio de materiales cubierto|Manejo de RCD y sitio autorizado|Residuos sólidos y peligrosos|Derrames y almacenamiento de combustibles|Protección de cuerpos de agua|Control de material particulado (humectación)|Maquinaria en buen estado (sin fugas)|Protección de la vegetación|Baterías sanitarias|Orden y aseo|Capacitación ambiental';
 const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
   personal: { titulo: 'Personal de interventoría', cols: [['nombre', 'Nombre'], ['cargo', 'Cargo'], ['dedicacion', 'Dedicación %', 'num'], ['cedula', 'Cédula'], ['matricula', 'Matrícula'], ['telefono', 'Teléfono'], ['correo', 'Correo'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
@@ -1492,6 +1497,16 @@ const TABLAS = {
   sst_documento: { titulo: 'SST · soportes del informe (anexos 1 a 22)', cols: [['mes', 'Mes (AAAA-MM)'], ['anexo', 'Anexo', 'select:' + ANEXOS_SST.map((a, i) => (i + 1) + '. ' + a).join('|')], ['descripcion', 'Descripción'], ['estado', 'Estado', 'select']] },
   ambiental: { titulo: 'Seguimiento ambiental (PAGA / PMA)', cols: [['fecha', 'Fecha', 'date'], ['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['ficha', 'Ficha'], ['actividad', 'Actividad'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['logro', 'Logro', 'num'], ['cantidad', 'Cantidad', 'num'], ['unidad', 'Und'], ['permiso', 'Permiso'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   pmt: { titulo: 'Planes de manejo de tránsito (PMT)', cols: [['frente', 'Frente'], ['abs_ini', 'Abscisa inicial'], ['abs_fin', 'Abscisa final'], ['cierre', 'Cierre', 'select:Total|Parcial|Por carril|Nocturno'], ['interferencia', 'Interferencia', 'select:Baja|Media|Alta'], ['radicado', 'Radicado aprobación'], ['aprobado', 'Aprobado', 'date'], ['desde', 'Vigente desde', 'date'], ['hasta', 'Vigente hasta', 'date'], ['dispositivos', 'Dispositivos'], ['ultima_inspeccion', 'Última inspección', 'date'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
+  amb_ficha: { titulo: 'Fichas del PAGA del contrato (catálogo)', cols: [['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['codigo', 'Código'], ['nombre', 'Ficha'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['unidad', 'Und'], ['periodicidad', 'Periodicidad', 'select:Diaria|Semanal|Quincenal|Mensual|Trimestral|Única'], ['responsable', 'Responsable'], ['presupuesto', 'Presupuesto', 'num'], ['ejecutado', 'Ejecutado', 'num'], ['notas', 'Avances / modificaciones']] },
+  amb_requisito: { titulo: 'Matriz de requisitos legales ambientales', cols: [['norma', 'Norma'], ['emisor', 'Quién la emite'], ['lineamiento', 'Lineamientos'], ['ficha', 'Ficha'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No|No aplica'], ['evidencia', 'Evidencia']] },
+  amb_permiso: { titulo: 'Permisos ambientales y fuentes de materiales (Decreto 1076 de 2015)', cols: [['tipo', 'Tipo', 'select:Aprovechamiento forestal|Ocupación de cauce|Concesión de aguas|Vertimientos|Emisiones atmosféricas|Fuente de materiales|Sitio de disposición de RCD|Otro'], ['autoridad', 'Autoridad'], ['acto', 'Resolución / acto'], ['fecha', 'Otorgado', 'date'], ['vence', 'Vence', 'date'], ['titular', 'Titular'], ['titulo_minero', 'Título minero / licencia'], ['autorizado', 'Autorizado'], ['obligaciones', 'Obligaciones'], ['estado', 'Estado', 'select']] },
+  rcd: { titulo: 'Residuos de construcción y demolición (Res. 1257 de 2021)', cols: [['fecha', 'Fecha', 'date'], ['frente', 'Frente'], ['tipo', 'Tipo', 'select:Aprovechable|No aprovechable|Peligroso'], ['generado', 'Generado', 'num'], ['aprovechado', 'Aprovechado', 'num'], ['dispuesto', 'Dispuesto', 'num'], ['unidad', 'Und', 'select:t|m³'], ['sitio', 'Sitio / gestor autorizado'], ['certificado', 'Certificado / manifiesto'], ['notas', 'Notas']] },
+  forestal: { titulo: 'Inventario forestal y compensación', cols: [['fecha', 'Fecha', 'date'], ['codigo', 'Código'], ['especie', 'Especie'], ['nombre_comun', 'Nombre común'], ['abscisa', 'Abscisa'], ['dap', 'DAP (cm)', 'num'], ['altura', 'Altura (m)', 'num'], ['volumen', 'Volumen (m³)', 'num'], ['tratamiento', 'Tratamiento', 'select:Conservar|Poda|Tala|Bloqueo y traslado'], ['permiso', 'Permiso'], ['compensar', 'A compensar', 'num'], ['sembrados', 'Sembrados', 'num'], ['estado', 'Estado', 'select']] },
+  agua: { titulo: 'Consumo de agua', cols: [['fecha', 'Fecha', 'date'], ['fuente', 'Fuente'], ['uso', 'Uso', 'select:Humectación de vías|Concretos y mezclas|Compactación|Campamento|Lavado|Otro'], ['volumen', 'Volumen (m³)', 'num'], ['permiso', 'Concesión / proveedor'], ['notas', 'Notas']] },
+  maquinaria: { titulo: 'Maquinaria: mantenimiento, emisiones y aceites usados', cols: [['equipo', 'Equipo'], ['placa', 'Placa / serie'], ['ultimo_mtto', 'Último mtto.', 'date'], ['proximo_mtto', 'Próximo mtto.', 'date'], ['emisiones', 'Cert. técnico-mecánica y emisiones'], ['vence_emisiones', 'Vence', 'date'], ['aceite', 'Aceite usado (gal)', 'num'], ['gestor_aceite', 'Gestor del aceite'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
+  monitoreo: { titulo: 'Monitoreos ambientales (ruido, aire, agua)', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Ruido|Calidad del aire|Agua superficial|Vertimiento'], ['punto', 'Punto'], ['parametro', 'Parámetro'], ['resultado', 'Resultado', 'num'], ['limite', 'Límite', 'num'], ['unidad', 'Und'], ['norma', 'Norma'], ['laboratorio', 'Laboratorio'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No']] },
+  amb_chequeo: { titulo: 'Lista de chequeo ambiental de obra', cols: [['fecha', 'Fecha', 'date'], ['frente', 'Frente'], ['aspecto', 'Aspecto', 'select:' + ASPECTOS_AMB], ['cumple', 'Cumple', 'select:Sí|No|No aplica'], ['observacion', 'Observación'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  pmt_inspeccion: { titulo: 'PMT · inspecciones y dispositivos', cols: [['fecha', 'Fecha', 'date'], ['frente', 'Frente'], ['dispositivo', 'Dispositivo', 'select:Señal preventiva|Señal reglamentaria|Señal informativa|Cono|Barricada|Canalizador / colombina|Delineador tubular|Cinta de demarcación|Luz de advertencia|Paletero (PARE/SIGA)|Valla|Polisombra'], ['requeridos', 'Requeridos', 'num'], ['instalados', 'Instalados', 'num'], ['condicion', 'Condición', 'select:Buena|Regular|Mala'], ['cumple', 'Cumple', 'select:Sí|No'], ['observacion', 'Observación'], ['accion', 'Acción']] },
   social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   ensayo: { titulo: 'Ensayos de laboratorio', cols: [['fecha', 'Fecha', 'date'], ['ensayo', 'Ensayo'], ['norma', 'Norma'], ['item', 'Ítem'], ['abscisa', 'Abscisa'], ['resultado', 'Resultado'], ['especificacion', 'Especificación'], ['cumple', 'Cumple', 'select:Sí|No|Pendiente'], ['laboratorio', 'Laboratorio']] },
 };
@@ -1581,7 +1596,7 @@ async function vTabla(cont, tabla) {
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
     if (t === 'ro') return `<td class="${typeof f[k] === 'number' ? 'num' : ''}" title="Calculado">${typeof f[k] === 'number' ? fmt(f[k], k === 'cumplimiento' ? 1 : 0) : esc(f[k] ?? '')}</td>`;
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
-    if (['fecha', 'plazo', 'hasta', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:var(--rojo);font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
+    if (['fecha', 'plazo', 'hasta', 'vence', 'vence_emisiones', 'proximo_mtto', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:var(--rojo);font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
     if (t === 'ia') { const vs = f.vencimientos_ia ? JSON.parse(f.vencimientos_ia) : [];
       return `<td class="sub" style="max-width:320px;white-space:normal">${esc(f[k] || '')}${vs.length ? `<br><button class="btn prim" data-venc="${f.id}" title="${esc(vs.map(v => (v.fecha || 'sin fecha') + ' · ' + v.descripcion).join('\n'))}">Crear vencimientos sugeridos (${vs.length})</button>` : ''}</td>`; }
     return celda(f[k], k, t);
@@ -1594,6 +1609,12 @@ async function vTabla(cont, tabla) {
     ${ind.map(m => `<tr><td>${esc(m.mes)}</td><td class="num">${fmt(m.frecuencia)}</td><td class="num">${fmt(m.severidad)}</td><td class="num">${fmt(m.mortalidad)}</td><td class="num">${fmt(m.ausentismo)}</td><td>${esc(m.planillas_ok)}</td></tr>`).join('') || '<tr><td colspan="6" class="sub">Agregue los datos del mes arriba</td></tr>'}
     </tbody></table></div><p class="sub">Frecuencia = AT del mes ÷ trabajadores × 100 · Severidad = (días de incapacidad + días cargados) ÷ trabajadores × 100 · Ausentismo = días de ausencia ÷ días programados × 100. Verifique las fórmulas con el texto oficial del Ministerio del Trabajo.</p>`);
   }
+  if (tabla === 'amb_ficha') {
+    $('#t-nuevo').insertAdjacentHTML('beforebegin', '<button class="btn" id="t-paga">Cargar fichas de la guía INVÍAS 2022</button><button class="btn" id="t-infamb">Informe ambiental (Word)</button>');
+    $('#t-paga').onclick = async () => { try { const r = await api('amb-catalogo/' + E.pid, 'POST'); aviso(`Fichas cargadas: ${r.fichas}; requisitos legales: ${r.requisitos}`); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+    $('#t-infamb').onclick = () => informeMensual('informe-ambiental');
+    cont.insertAdjacentHTML('beforeend', '<p class="sub">Fichas según la Guía de Manejo Ambiental del INVÍAS, modo carretero (2022, Res. 2335 de 2022). Los programas 6 a 10 son sociales: regístrelos en "Gestión social" con el mismo código de ficha. Ajuste los nombres marcados "(verificar)" con el PAGA aprobado.</p>');
+  }
   if (tabla === 'poliza') { $('#t-nuevo').insertAdjacentHTML('beforebegin', '<button class="btn" id="t-poliza-ia" title="Suba el PDF o la foto de la póliza: la IA lee los amparos y usted confirma">📄 Leer póliza con IA</button> '); $('#t-poliza-ia').onclick = leerDocumentoIA; }
   if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
   const g = $('#g-tabla');
@@ -1604,7 +1625,7 @@ async function vTabla(cont, tabla) {
   });
   g.addEventListener('click', async e => { const ch = e.target.closest('[data-chequeo]'); if (ch) return dialogoChequeo(Number(ch.dataset.chequeo)); const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
   if ($('#t-libreta')) $('#t-libreta').onclick = () => { E.bitVista = 'libreta'; pintarDocs(); };
-  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_epp', 'sst_investigacion', 'sst_emergencia', 'sst_actividad'].includes(tabla) ? { fecha: hoyISO() } : ['sst_mes', 'sst_seguridad_social', 'sst_documento'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'rcd', 'forestal', 'agua', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_epp', 'sst_investigacion', 'sst_emergencia', 'sst_actividad'].includes(tabla) ? { fecha: hoyISO() } : ['sst_mes', 'sst_seguridad_social', 'sst_documento'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
 // ---------- Panel lateral ----------

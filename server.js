@@ -7,7 +7,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
-const { informeFormato, informeSSTFormato } = require('./informe.js');
+const { informeFormato, informeSSTFormato, informeAmbiental } = require('./informe.js');
+const { cargarPaga } = require('./seed/paga.js');
 const prov = require('./proveedores.js');
 const { crearCorreo } = require('./correo.js');
 
@@ -21,19 +22,22 @@ const db = new Base(DATOS);
 // Anexos de SST de la interventoría (ver schema.sql)
 const SST_ANEXOS = ['sst_peligro', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_trabajador', 'sst_epp', 'sst_seguridad_social', 'sst_investigacion', 'sst_emergencia', 'sst_equipo', 'sst_actividad', 'sst_documento'];
 
+// Anexos ambientales del PAGA y del PMT (ver schema.sql)
+const AMB = ['amb_ficha', 'amb_requisito', 'amb_permiso', 'rcd', 'forestal', 'agua', 'maquinaria', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion'];
+
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
   proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', otrosi_item: 'otrosi_id', gasto: 'contrato_id',
   suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
-  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'proyecto_id'])), ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
+  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'proyecto_id'])), ambiental: 'proyecto_id', pmt: 'proyecto_id', ...Object.fromEntries(AMB.map(t => [t, 'proyecto_id'])), social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
   requisicion: 'proyecto_id', requisicion_item: 'requisicion_id',
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
-    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ...SST_ANEXOS.map(t => [t, 'proyecto_id']), ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id'], ['requisicion', 'proyecto_id']],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ...SST_ANEXOS.map(t => [t, 'proyecto_id']), ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ...AMB.map(t => [t, 'proyecto_id']), ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id'], ['requisicion', 'proyecto_id']],
   requisicion: [['requisicion_item', 'requisicion_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
   adjunto: [['adjunto_dato', 'adjunto_id']],
@@ -49,8 +53,8 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'requisicion', 'requisicion_item'],
-  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'requisicion', 'requisicion_item'],
+  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', ...AMB, 'requisicion', 'requisicion_item'],
+  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', ...AMB, 'requisicion', 'requisicion_item'],
   administrativo: ['adjunto', 'otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento', 'requisicion', 'requisicion_item'],
   entidad: [],
 };
@@ -375,6 +379,14 @@ async function avisos(proyectoId) {
       out.push({ fecha: r.plazo, tipo: nombre, texto: [r.tipo || r.componente, r.accion || r[campo]].filter(Boolean).join(': '), abrir: 'tabla:' + tabla });
   for (const m of await db.all(`SELECT * FROM pmt WHERE proyecto_id = ? AND estado <> 'Cerrado' AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, proyectoId, limite))
     out.push({ fecha: m.hasta, tipo: 'PMT', texto: `Vence la aprobación del PMT ${m.frente || ''} ${m.abs_ini ? '(' + m.abs_ini + ' a ' + (m.abs_fin || '') + ')' : ''}`.trim(), abrir: 'tabla:pmt' });
+  // Permisos ambientales: aviso con 30 días porque su renovación se tramita ante la autoridad ambiental
+  const mes30 = iso(new Date(hoy.getTime() + 30 * 86400000));
+  for (const p of await db.all(`SELECT * FROM amb_permiso WHERE proyecto_id = ? AND COALESCE(estado, '') NOT IN ('Cerrado', 'Negado') AND vence IS NOT NULL AND vence <= ? ORDER BY vence`, proyectoId, mes30))
+    out.push({ fecha: p.vence, tipo: 'Permiso ambiental', texto: `${p.vence < iso(hoy) ? 'Vencido' : 'Vence'}: ${p.tipo || 'permiso'} ${p.acto || ''} (${p.autoridad || ''})`.trim(), abrir: 'tabla:amb_permiso' });
+  for (const m of await db.all('SELECT * FROM maquinaria WHERE proyecto_id = ? AND vence_emisiones IS NOT NULL AND vence_emisiones <= ? ORDER BY vence_emisiones', proyectoId, limite))
+    out.push({ fecha: m.vence_emisiones, tipo: 'Emisiones', texto: `Certificado de emisiones de ${m.equipo || ''} ${m.placa || ''}`.trim(), abrir: 'tabla:maquinaria' });
+  for (const c of await db.all(`SELECT * FROM amb_chequeo WHERE proyecto_id = ? AND cumple = 'No' AND COALESCE(estado, '') <> 'Cerrado' AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
+    out.push({ fecha: c.plazo, tipo: 'Ambiental', texto: `${c.aspecto || ''}: ${c.accion || c.observacion || ''}`, abrir: 'tabla:amb_chequeo' });
   for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
   for (const r of await db.all(`SELECT * FROM requisicion WHERE proyecto_id = ? AND estado IN ('Solicitada', 'Aprobada') ORDER BY fecha`, proyectoId))
@@ -435,7 +447,7 @@ const txt = d => ({ type: 'string', description: d });
 const HERRAMIENTAS = [
   { name: 'consultar_tabla', description: 'Lee registros de una tabla del proyecto actual. Filtros por igualdad exacta; si el valor tiene % se usa LIKE. Devuelve como máximo "limite" filas (50 por defecto).',
     input_schema: obj({ tabla: { type: 'string', enum: ['contrato', 'item', 'acta', 'otrosi', 'suspension', 'liquidacion', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo',
-      'tarea', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'adjunto'] },
+      'tarea', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', ...AMB, 'social', 'adjunto'] },
       filtros: { type: 'object', description: 'Columna → valor, p. ej. {"estado":"Pendiente"}', additionalProperties: { type: ['string', 'number'] } },
       limite: { type: 'integer', minimum: 1, maximum: 200 } }, ['tabla']) },
   { name: 'detalle_acta', description: 'Detalle de un acta parcial o cuenta de cobro: por ítem con movimiento, cantidad contratada, anterior, presentada, aprobada, acumulada, saldo y valores; y los totales.',
@@ -854,6 +866,21 @@ async function avanceFisico(pid, hoy) {
   return { hoy, tareas, programado: r2(prog), real: r2(real), spi: prog ? r2(real / prog) : null };
 }
 
+// Anexo ambiental del mes: fichas del PAGA con su avance, permisos, RCD, forestal, agua, maquinaria, monitoreos, chequeo y PMT
+async function ambientalMes(pid, ini, fin, del) {
+  const todos = t => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ? ORDER BY id`, pid);
+  const seg = await del('ambiental');
+  const social = await del('social');
+  // Las fichas sociales (programas 6 a 10) se alimentan de "Gestión social" con el mismo código de ficha
+  const fichas = (await todos('amb_ficha')).map(f => { const r = seg.filter(s => s.ficha && s.ficha === f.codigo); return { ...f, registros: r.length + social.filter(s => s.ficha && s.ficha === f.codigo).length, logro: r.reduce((a, s) => a + (s.logro || 0), 0), actividades: r }; });
+  const rcd = await del('rcd'), suma = k => r2(rcd.reduce((a, x) => a + (x[k] || 0), 0));
+  const forestal = await todos('forestal');
+  return { fichas, seguimiento: seg, requisitos: await todos('amb_requisito'), permisos: await todos('amb_permiso'), rcd, rcd_tot: { generado: suma('generado'), aprovechado: suma('aprovechado'), dispuesto: suma('dispuesto'), pct: suma('generado') ? r2(suma('aprovechado') / suma('generado') * 100) : null },
+    forestal: forestal.filter(f => f.fecha >= ini && f.fecha <= fin), forestal_tot: { inventario: forestal.length, intervenidos: forestal.filter(f => ['Tala', 'Bloqueo y traslado'].includes(f.tratamiento)).length, compensar: forestal.reduce((a, f) => a + (f.compensar || 0), 0), sembrados: forestal.reduce((a, f) => a + (f.sembrados || 0), 0) },
+    agua: await del('agua'), maquinaria: await todos('maquinaria'), monitoreos: await del('monitoreo'), chequeo: await del('amb_chequeo'), pmt_insp: await del('pmt_inspeccion'),
+    soportes: await db.all(`SELECT tabla, registro_id, nombre, descripcion, categoria, fecha FROM adjunto WHERE proyecto_id = ? AND tabla IN (${['ambiental', 'pmt', ...AMB].map(() => '?').join(',')}) AND fecha BETWEEN ? AND ? ORDER BY tabla, fecha`, pid, 'ambiental', 'pmt', ...AMB, ini, fin) };
+}
+
 // Cuadros de control del informe mensual: balance por capítulo, curva S, flujo de anticipo
 // y fotos "antes" del mismo punto fijo.
 async function extrasInforme(pid, contratos, ini, fin, tareas) {
@@ -1002,6 +1029,11 @@ async function calendario(pid, desde, hasta) {
   for (const e of await filas('ensayo')) add(e.fecha, 'Ensayo', [e.ensayo, e.abscisa, e.resultado].filter(Boolean).join(' · '), 'tabla:ensayo');
   for (const s of await filas('sst')) add(s.plazo, 'SST', [s.tipo, s.accion || s.descripcion].filter(Boolean).join(': '), 'tabla:sst', s.estado !== 'Cerrado');
   for (const a of await filas('ambiental')) add(a.plazo, 'Ambiental', [a.componente || a.programa, a.accion || a.actividad].filter(Boolean).join(': '), 'tabla:ambiental', a.estado !== 'Cerrado');
+  for (const p of await filas('amb_permiso')) add(p.vence, 'Permiso ambiental', `Vence ${p.tipo || 'permiso'} ${p.acto || ''} (${p.autoridad || ''})`, 'tabla:amb_permiso', !['Cerrado', 'Negado'].includes(p.estado));
+  for (const m of await filas('monitoreo')) add(m.fecha, 'Ambiental', `Monitoreo ${m.tipo || ''} ${m.punto || ''}`, 'tabla:monitoreo');
+  for (const m of await filas('maquinaria')) { add(m.proximo_mtto, 'Ambiental', `Mantenimiento ${m.equipo || ''} ${m.placa || ''}`, 'tabla:maquinaria', true); add(m.vence_emisiones, 'Ambiental', `Vence certificado de emisiones ${m.equipo || ''} ${m.placa || ''}`, 'tabla:maquinaria', true); }
+  for (const c of await filas('amb_chequeo')) if (c.cumple === 'No') add(c.plazo, 'Ambiental', `${c.aspecto || ''}: ${c.accion || c.observacion || ''}`, 'tabla:amb_chequeo', c.estado !== 'Cerrado');
+  for (const i of await filas('pmt_inspeccion')) add(i.fecha, 'PMT', `Inspección PMT ${i.frente || ''} · ${i.dispositivo || ''}`, 'tabla:pmt_inspeccion');
   for (const a of await db.all(`SELECT a.*, i.codigo FROM avance a LEFT JOIN item i ON i.id = a.item_id WHERE a.proyecto_id = ? AND a.estado <> 'Rechazado'`, pid))
     add(a.fecha, 'Captura', `Avance ${a.codigo || ''} ${a.frente || ''} ${a.cantidad != null ? '· ' + a.cantidad : ''}`, 'avances');
   for (const t of await db.all('SELECT * FROM tarea WHERE proyecto_id = ? AND resumen = 0', pid)) {
@@ -1067,6 +1099,7 @@ async function informeMensual(pid, mes) {
       trabajadores: await db.all("SELECT * FROM sst_trabajador WHERE proyecto_id = ? AND (ingreso IS NULL OR ingreso <= ?) AND (retiro IS NULL OR retiro >= ?) ORDER BY nombre", pid, fin, ini),
       soportes: await db.all(`SELECT tabla, nombre, descripcion, categoria, fecha FROM adjunto WHERE proyecto_id = ? AND tabla LIKE 'sst%' AND fecha BETWEEN ? AND ? ORDER BY tabla, fecha`, pid, ini, fin) },
     pmt: await db.all('SELECT * FROM pmt WHERE proyecto_id = ? AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY frente', pid, fin, ini),
+    amb: await ambientalMes(pid, ini, fin, del),
     social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
     vencimientos: r.vencimientos,
     director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría',
@@ -1079,7 +1112,7 @@ async function informeMensual(pid, mes) {
     items_np: await db.all("SELECT i.* FROM item i JOIN contrato c ON c.id = i.contrato_id WHERE c.proyecto_id = ? AND i.otrosi_id IS NOT NULL", pid),
     anexos: await (async () => {
       const a = await db.all("SELECT tabla, registro_id, nombre, descripcion, tipo_mime, fecha FROM adjunto WHERE proyecto_id = ? AND categoria <> 'Foto' AND fecha BETWEEN ? AND ?", pid, ini, fin), g = {};
-      for (const x of a) { const t = `${x.nombre || ''} ${x.descripcion || ''}`, k = /\.(dwg|dxf|kmz|kml)$/i.test(x.nombre || '') || /plano/i.test(t) || ['tramo', 'alineamiento'].includes(x.tabla) ? 'planos' : /recibo/i.test(t) ? 'recibo' : /reuni|comit/i.test(t) ? 'social' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : 'otros'; (g[k] = g[k] || []).push(x); }
+      for (const x of a) { const t = `${x.nombre || ''} ${x.descripcion || ''}`, k = /\.(dwg|dxf|kmz|kml)$/i.test(x.nombre || '') || /plano/i.test(t) || ['tramo', 'alineamiento'].includes(x.tabla) ? 'planos' : /recibo/i.test(t) ? 'recibo' : /reuni|comit/i.test(t) ? 'social' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : ['ambiental', 'pmt', ...AMB].includes(x.tabla) ? 'ambiental' : 'otros'; (g[k] = g[k] || []).push(x); }
       return g; })(),
     // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
     fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
@@ -1219,6 +1252,7 @@ async function api(req, res, url) {
   if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
   if (r0 === 'docx' && r1 === 'informe-sst') { const d = await informeSST(Number(r2_), q.mes); return archivo(`Informe_SST_${d.mes}.docx`, DOCX, await informeSSTFormato(d)); }
   if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await informeFormato(d)); }
+  if (r0 === 'docx' && r1 === 'informe-ambiental') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_ambiental_${d.mes}.docx`, DOCX, await informeAmbiental(d)); }
   if (r0 === 'requisicion' && req.method === 'GET') return enviar(res, 200, await detalleRQ(Number(r1)));
   if (r0 === 'xlsx' && r1 === 'requisicion') { const d = await detalleRQ(Number(r2_)); return archivo(`RQ_${d.requisicion.numero}.xlsx`, XLSX, await integ.xlsxRequisicion(d)); }
   if (r0 === 'docx' && r1 === 'requisicion') { const d = await detalleRQ(Number(r2_)); return archivo(`RQ_${d.requisicion.numero}.docx`, DOCX, await integ.docxRequisicion(d)); }
@@ -1299,6 +1333,12 @@ async function api(req, res, url) {
     if (!conjuntos[conjunto]) return enviar(res, 200, { conjuntos: Object.keys(conjuntos).map(k => `/api/bi/${pid}/${k}.csv`) });
     const filas = await conjuntos[conjunto]();
     return ext === 'json' ? enviar(res, 200, filas) : enviar(res, 200, integ.csv(filas), 'text/csv; charset=utf-8');
+  }
+  if (r0 === 'amb-catalogo' && req.method === 'POST') {
+    exigir(u, 'amb_ficha');
+    const r = await cargarPaga(db, Number(r1));
+    await auditar(u, 'amb_ficha', null, 'catálogo PAGA', r);
+    return enviar(res, 200, r);
   }
   if (r0 === 'sst-indicadores') return enviar(res, 200, indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? ORDER BY mes', Number(r1))));
   // ---------- Adjuntos y registro fotográfico ----------
@@ -1479,7 +1519,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
       const filtro = padre && q[padre] ? ` WHERE ${padre} = ?` : '';
-      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', sst_inspeccion: 'fecha DESC', sst_permiso: 'fecha DESC', sst_capacitacion: 'fecha DESC', sst_epp: 'fecha DESC', sst_seguridad_social: 'mes DESC, trabajador', sst_investigacion: 'fecha DESC', sst_emergencia: 'fecha DESC', sst_trabajador: 'nombre', sst_peligro: 'nr DESC, id', sst_equipo: 'equipo', sst_actividad: 'fecha DESC', sst_documento: 'mes DESC, anexo', ambiental: 'fecha DESC', pmt: 'id', social: 'fecha DESC', requisicion: 'numero DESC' }[tabla] || 'id';
+      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', sst_inspeccion: 'fecha DESC', sst_permiso: 'fecha DESC', sst_capacitacion: 'fecha DESC', sst_epp: 'fecha DESC', sst_seguridad_social: 'mes DESC, trabajador', sst_investigacion: 'fecha DESC', sst_emergencia: 'fecha DESC', sst_trabajador: 'nombre', sst_peligro: 'nr DESC, id', sst_equipo: 'equipo', sst_actividad: 'fecha DESC', sst_documento: 'mes DESC, anexo', ambiental: 'fecha DESC', pmt: 'id', amb_ficha: 'programa, codigo', amb_permiso: 'vence IS NULL, vence', rcd: 'fecha DESC', forestal: 'codigo, id', agua: 'fecha DESC', maquinaria: 'equipo', monitoreo: 'fecha DESC', amb_chequeo: 'fecha DESC', pmt_inspeccion: 'fecha DESC', social: 'fecha DESC', requisicion: 'numero DESC' }[tabla] || 'id';
       return enviar(res, 200, await db.all(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`, ...(filtro ? [Number(q[padre])] : [])));
     }
     if (req.method !== 'GET') exigir(u, tabla);

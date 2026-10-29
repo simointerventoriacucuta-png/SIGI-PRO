@@ -234,6 +234,27 @@ function anexoSST(d, n) {
     p(fotos.length ? `Registro fotográfico de SST: fotos N.º ${fotos.map(f => f.n).join(', ')} del anexo 1.` : 'Sin fotos de SST en el periodo.', { sangria: 360 });
 }
 
+// Cuadros del seguimiento ambiental y del PMT (Guía de Manejo Ambiental del INVÍAS, PAGA del contrato)
+const NOMBRES_AMB = { ambiental: 'Seguimiento a fichas', pmt: 'PMT', amb_ficha: 'Fichas del PAGA', amb_permiso: 'Permisos ambientales', rcd: 'RCD', forestal: 'Forestal', agua: 'Consumo de agua', maquinaria: 'Maquinaria y emisiones', monitoreo: 'Monitoreos', amb_chequeo: 'Lista de chequeo', pmt_inspeccion: 'Inspección PMT' };
+function cuadrosAmbientales(a) {
+  const sub = t => p(t, { b: true, despues: 60 });
+  const o = [];
+  if (a.fichas.length) o.push(sub('Fichas del PAGA: indicador, meta y logro del periodo'), tabla(['PROGRAMA', 'FICHA', 'INDICADOR', 'PERIODICIDAD', 'META', 'LOGRO', 'REG.'], a.fichas.map(f => [f.programa || '', `${f.codigo || ''} ${f.nombre || ''}`, f.indicador || '', f.periodicidad || '', f.meta != null ? `${num(f.meta)} ${f.unidad || ''}` : '', num(f.logro), f.registros]), [2, 2.4, 2, 1.2, 1, 0.9, 0.6]));
+  if (a.permisos.length) o.push(sub('Permisos ambientales y fuentes de materiales'), tabla(['TIPO', 'AUTORIDAD', 'ACTO', 'TÍTULO MINERO', 'AUTORIZADO', 'VENCE', 'ESTADO'], a.permisos.map(x => [x.tipo || '', x.autoridad || '', x.acto || '', x.titulo_minero || '', x.autorizado || '', fecha(x.vence), x.estado || '']), [1.8, 1.4, 1.4, 1.2, 1.4, 1.4, 1]));
+  o.push(sub('Residuos de construcción y demolición (Res. 1257 de 2021)'), a.rcd.length
+    ? tabla(['FECHA', 'FRENTE', 'TIPO', 'GENERADO', 'APROVECHADO', 'DISPUESTO', 'SITIO / GESTOR', 'CERTIFICADO'], a.rcd.map(r => [fecha(r.fecha), r.frente || '', r.tipo || '', num(r.generado), num(r.aprovechado), num(r.dispuesto), r.sitio || '', r.certificado || '']), [1.3, 1, 1.1, 1, 1, 1, 1.6, 1.2])
+      + p(`Total del periodo: generado ${num(a.rcd_tot.generado)}, aprovechado ${num(a.rcd_tot.aprovechado)}, dispuesto ${num(a.rcd_tot.dispuesto)}${a.rcd_tot.pct != null ? `; aprovechamiento ${num(a.rcd_tot.pct)} %` : ''}.`)
+    : p('Sin registros de RCD en el periodo.', { i: true, color: '595959' }));
+  if (a.forestal_tot.inventario) o.push(sub('Inventario forestal y compensación'), p(`Individuos inventariados: ${a.forestal_tot.inventario}; intervenidos (tala o traslado): ${a.forestal_tot.intervenidos}; compensación exigida: ${num(a.forestal_tot.compensar, 0)} individuos; sembrados: ${num(a.forestal_tot.sembrados, 0)}.`),
+    a.forestal.length ? tabla(['CÓDIGO', 'ESPECIE', 'ABSCISA', 'DAP (cm)', 'VOL. (m³)', 'TRATAMIENTO', 'PERMISO'], a.forestal.map(f => [f.codigo || '', [f.especie, f.nombre_comun].filter(Boolean).join(' · '), f.abscisa || '', num(f.dap, 1), num(f.volumen), f.tratamiento || '', f.permiso || '']), [1, 2.4, 1.2, 0.9, 0.9, 1.3, 1.4]) : '');
+  if (a.agua.length) o.push(sub('Consumo de agua'), tabla(['FECHA', 'FUENTE', 'USO', 'VOLUMEN (m³)', 'PERMISO'], a.agua.map(w => [fecha(w.fecha), w.fuente || '', w.uso || '', num(w.volumen), w.permiso || '']), [1.4, 2, 2, 1.2, 1.6]), p(`Total del periodo: ${num(a.agua.reduce((t, w) => t + (w.volumen || 0), 0))} m³.`));
+  if (a.maquinaria.length) o.push(sub('Maquinaria: mantenimiento, emisiones y aceites usados'), tabla(['EQUIPO', 'PLACA', 'ÚLT. MTTO.', 'PRÓX. MTTO.', 'CERT. EMISIONES', 'VENCE', 'ACEITE (gal)', 'CUMPLE'], a.maquinaria.map(m => [m.equipo || '', m.placa || '', fecha(m.ultimo_mtto), fecha(m.proximo_mtto), m.emisiones || '', fecha(m.vence_emisiones), num(m.aceite, 1), m.cumple || '']), [1.6, 0.9, 1.2, 1.2, 1.2, 1.2, 0.8, 0.8]));
+  if (a.monitoreos.length) o.push(sub('Monitoreos ambientales'), tabla(['FECHA', 'TIPO', 'PUNTO', 'PARÁMETRO', 'RESULTADO', 'LÍMITE', 'NORMA', 'CUMPLE'], a.monitoreos.map(m => [fecha(m.fecha), m.tipo || '', m.punto || '', m.parametro || '', `${num(m.resultado)} ${m.unidad || ''}`, m.limite != null ? `${num(m.limite)} ${m.unidad || ''}` : '', m.norma || '', m.cumple || '']), [1.3, 1, 1.2, 1.1, 1.1, 1.1, 1.3, 0.8]));
+  if (a.chequeo.length) { const no = a.chequeo.filter(c => c.cumple === 'No'); o.push(sub('Lista de chequeo ambiental de obra'), p(`${a.chequeo.length} aspecto(s) verificados, ${no.length} no conforme(s).`), no.length ? tabla(['FECHA', 'FRENTE', 'ASPECTO', 'OBSERVACIÓN', 'ACCIÓN', 'ESTADO'], no.map(c => [fecha(c.fecha), c.frente || '', c.aspecto || '', c.observacion || '', c.accion || '', c.estado || '']), [1.3, 1, 2, 2, 1.8, 0.9]) : ''); }
+  if (a.pmt_insp.length) o.push(sub('Inspecciones al PMT y dispositivos de control del tránsito'), tabla(['FECHA', 'FRENTE', 'DISPOSITIVO', 'REQ.', 'INST.', 'CONDICIÓN', 'CUMPLE', 'ACCIÓN'], a.pmt_insp.map(i => [fecha(i.fecha), i.frente || '', i.dispositivo || '', num(i.requeridos, 0), num(i.instalados, 0), i.condicion || '', i.cumple || '', i.accion || '']), [1.3, 1, 1.7, 0.6, 0.6, 1, 0.8, 1.8]));
+  return o.join('');
+}
+
 function capituloContratista(c, d) {
   const act = c.actividades || [], f = d.fisico;
   const bit = d.bitacora, clima = {};
@@ -270,6 +291,7 @@ function capituloContratista(c, d) {
     p('1.4.4. ACTIVIDADES AMBIENTALES, SOCIALES Y DE SST', { b: true, sangria: 280 }),
     d.ambiental.length ? tabla(['FECHA', 'PROGRAMA / FICHA', 'ACTIVIDAD', 'INDICADOR', 'META / LOGRO', 'ESTADO'], d.ambiental.map(a => [fecha(a.fecha), [a.programa, a.ficha].filter(Boolean).join(' · '), a.actividad || '', a.indicador || '', a.meta != null ? `${num(a.meta)} / ${num(a.logro)}` : '', a.estado || '']), [1.4, 2.2, 2.4, 1.6, 1.2, 1]) : p('Sin registros de seguimiento ambiental en el periodo.', { i: true, color: '595959' }),
     d.pmt.length ? p(`Planes de manejo de tránsito vigentes: ${d.pmt.map(m => `${m.frente || ''} (${m.radicado || 'sin radicado'}, hasta ${fecha(m.hasta)}, cumple: ${m.cumple})`).join('; ')}.`) : '',
+    d.amb ? cuadrosAmbientales(d.amb) : '',
     d.sst_ind ? p(`SST: ${d.sst_ind.trabajadores} trabajadores; frecuencia de accidentalidad ${num(d.sst_ind.frecuencia)}, severidad ${num(d.sst_ind.severidad)}, ausentismo ${num(d.sst_ind.ausentismo)} % (Res. 0312 de 2019).`) : '',
     d.sst.length ? tabla(['FECHA', 'TIPO', 'FRENTE', 'DESCRIPCIÓN', 'ACCIÓN', 'ESTADO'], d.sst.map(s => [fecha(s.fecha), s.tipo || '', s.frente || '', s.descripcion || s.hallazgo || '', s.accion || '', s.estado || '']), [1.4, 1.6, 1.3, 3, 2, 1]) : '',
     p('Resumen de la gestión en seguridad y salud en el trabajo del periodo (detalle y soportes en el anexo 9):'), sstResumen(d), sstCuadros(d),
@@ -320,7 +342,8 @@ function capituloInterventoria(c, ob, d) {
       `Contrato de interventoría: facturado acumulado ${pesos(c.acumulado_mes)} de ${pesos(c.valor_vigente)}.`]),
     p('Cuentas de cobro de la interventoría y curva de ejecución:', { b: true }), cuadroFlujo(c), cuadroCurva(c),
     p('2.3.4. ACTIVIDADES AMBIENTALES', { b: true, sangria: 280 }),
-    lista([`Seguimiento a las fichas del PAGA/PMA: ${d.ambiental.length} registro(s); PMT vigentes: ${d.pmt.length}.`, `SST: ${d.sst.length} inspección(es) o evento(s) registrados${d.sst_ind ? `; frecuencia de accidentalidad ${num(d.sst_ind.frecuencia)}` : ''}.`,
+    lista([`Seguimiento a las fichas del PAGA/PMA: ${d.ambiental.length} registro(s); PMT vigentes: ${d.pmt.length}.`,
+      ...(d.amb ? [`Verificación de anexos ambientales: ${d.amb.permisos.length} permiso(s) en seguimiento, ${d.amb.rcd.length} registro(s) de RCD${d.amb.rcd_tot.pct != null ? ` (${num(d.amb.rcd_tot.pct)} % aprovechado)` : ''}, ${d.amb.monitoreos.length} monitoreo(s), ${d.amb.chequeo.length} punto(s) de chequeo e ${d.amb.pmt_insp.length} inspección(es) al PMT; ${d.amb.soportes.length} soporte(s) en el anexo 10.`] : []), `SST: ${d.sst.length} inspección(es) o evento(s) registrados${d.sst_ind ? `; frecuencia de accidentalidad ${num(d.sst_ind.frecuencia)}` : ''}.`,
       `Gestión social: ${d.social.length} actividad(es); PQRS abiertas ${d.pqrs_abiertas.length}${d.pqrs_vencidas.length ? ' (' + d.pqrs_vencidas.length + ' vencidas)' : ''}.`]),
     p('2.3.5. ACTIVIDADES DE ASEGURAMIENTO DE LA CALIDAD', { b: true, sangria: 280 }),
     p('Verificación de los resultados de laboratorio frente a las especificaciones y control del plan de calidad del contratista y de la interventoría.'),
@@ -352,10 +375,14 @@ function observaciones(d, ob) {
 }
 
 // Cada anexo relaciona los soportes adjuntos del mes (archivo, fecha y registro de origen) y los registros del periodo que respalda
-const ORIGEN = { ensayo: 'Ensayo', social: 'Gestión social', correspondencia: 'Correspondencia', bitacora: 'Bitácora', acta: 'Acta', otrosi: 'Otrosí', poliza: 'Póliza', suspension: 'Suspensión', tramo: 'Tramo', sst: 'SST', ambiental: 'Ambiental', pmt: 'PMT', gasto: 'Gasto', contrato: 'Contrato', proyecto: 'Proyecto' };
+const ORIGEN = { ...NOMBRES_AMB,  ensayo: 'Ensayo', social: 'Gestión social', correspondencia: 'Correspondencia', bitacora: 'Bitácora', acta: 'Acta', otrosi: 'Otrosí', poliza: 'Póliza', suspension: 'Suspensión', tramo: 'Tramo', sst: 'SST', ambiental: 'Ambiental', pmt: 'PMT', gasto: 'Gasto', contrato: 'Contrato', proyecto: 'Proyecto' };
 function soportes(a) {
   return tabla(['N.º', 'DOCUMENTO ADJUNTO', 'FECHA', 'REGISTRO DE ORIGEN', 'DESCRIPCIÓN'],
     (a || []).map((x, i) => [i + 1, x.nombre || '', fecha(x.fecha), `${ORIGEN[x.tabla] || x.tabla || '—'}${x.registro_id ? ' #' + x.registro_id : ''}`, x.descripcion || '']), [0.5, 3, 1.5, 1.8, 3], 'Sin documentos adjuntos en el periodo.');
+}
+// Anexo ambiental y PMT: soportes del mes de las fichas, permisos, RCD, forestal, maquinaria, monitoreos, chequeos e inspecciones
+function anexoAmbiental(d, n) {
+  return subtitulo(`ANEXO ${n}. AMBIENTAL Y PMT`) + soportes(d.amb?.soportes);
 }
 function anexos(d) {
   const grupo = (n, t, a, extra = '') => subtitulo(`ANEXO ${n}. ${t}`) + extra + soportes(a);
@@ -371,7 +398,7 @@ function anexos(d) {
     grupo(5, 'ACTAS DE RECIBO DE LA COMUNIDAD Y/O MUNICIPIO', d.anexos.recibo) +
     grupo(6, 'CORRESPONDENCIA', d.anexos.correspondencia, regs(d.correspondencia.map(c => [fecha(c.fecha), c.radicado || '', c.sentido || '', [c.de, c.para].filter(Boolean).join(' → '), c.asunto || '', c.estado || '']), ['FECHA', 'RADICADO', 'SENTIDO', 'DE → PARA', 'ASUNTO', 'ESTADO'], [1.4, 1.4, 1.1, 2.2, 3.2, 1.1])) +
     grupo(7, 'BITÁCORA DE OBRA', d.anexos.bitacora, d.bitacora.length ? p(`La bitácora registra ${d.bitacora.length} anotación(es) entre el ${fecha(d.bitacora[0].fecha)} y el ${fecha(d.bitacora[d.bitacora.length - 1].fecha)}.`) : '') +
-    grupo(8, 'OTROS', d.anexos.otros, (d.contratos.find(c => c.tipo === 'obra')?.balance_items?.length ? p('Balance de cantidades por ítem del contrato de obra:', { b: true }) + cuadroBalanceItems(d.contratos.find(c => c.tipo === 'obra')) : '') + externos) + anexoSST(d, 9);
+    grupo(8, 'OTROS', d.anexos.otros, (d.contratos.find(c => c.tipo === 'obra')?.balance_items?.length ? p('Balance de cantidades por ítem del contrato de obra:', { b: true }) + cuadroBalanceItems(d.contratos.find(c => c.tipo === 'obra')) : '') + externos) + anexoSST(d, 9) + anexoAmbiental(d, 10);
 }
 
 function cuerpo(d) {
@@ -446,7 +473,7 @@ async function informeFormato(d, plantilla, generar = cuerpo) {
   if (!/xmlns:r=/.test(xml)) xml = xml.replace('<w:document ', '<w:document xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
   const todas = [...d.fotos, ...(d.antes_despues || []).flatMap(x => [x.antes, x.despues])];
   todas.forEach((f, i) => { f.n = i + 1; });
-  zip.file('word/document.xml', xml.slice(0, ini) + cuerpo(d) + sect + xml.slice(fin));
+  zip.file('word/document.xml', xml.slice(0, ini) + generar(d) + sect + xml.slice(fin));
   // Word actualiza la tabla de contenido y los números de página al abrir
   const set = zip.file('word/settings.xml');
   if (set && !/updateFields/.test(set.asText())) zip.file('word/settings.xml', set.asText().replace(/(<w:hdrShapeDefaults|<w:footnotePr|<w:endnotePr|<w:compat[ >]|<w:docVars|<w:rsids|<m:mathPr|<w:attachedSchema|<w:themeFontLang|<w:clrSchemeMapping|<w:decimalSymbol|<w:listSeparator|<\/w:settings>)/, '<w:updateFields w:val="true"/>$1'));
@@ -527,5 +554,59 @@ function informeSSTFormato(d, plantilla) {
   return informeFormato({ ...d, fotos: d.fotos.filter(f => /^sst/.test(f.tabla || '')), titulo_formato: 'INFORME MENSUAL DEL SG-SST DEL CONTRATISTA' }, plantilla, cuerpoSST);
 }
 
-module.exports = { informeFormato, informeSSTFormato, registrarAnexo };
+// ---------- Informe ambiental mensual (estructura del PAGA, Guía de Manejo Ambiental INVÍAS 2022, Res. 2335 de 2022) ----------
+function cuerpoAmbiental(d) {
+  const a = d.amb, ob = d.contratos.find(c => c.tipo === 'obra');
+  const conMeta = a.fichas.filter(f => f.meta);
+  const avanceAmb = conMeta.length ? conMeta.reduce((t, f) => t + Math.min(1, (f.logro || 0) / f.meta), 0) / conMeta.length * 100 : null;
+  const programas = [...new Set(a.fichas.map(f => f.programa).concat(a.seguimiento.map(s => s.programa)).filter(Boolean))];
+  const pres = programas.map(pg => { const f = a.fichas.filter(x => x.programa === pg); return [pg, f.reduce((t, x) => t + (x.presupuesto || 0), 0), f.reduce((t, x) => t + (x.ejecutado || 0), 0)]; }).filter(r => r[1] || r[2]);
+  const totP = pres.reduce((t, r) => t + r[1], 0), totE = pres.reduce((t, r) => t + r[2], 0);
+  const pct = (e, p) => (p ? num(e / p * 100) + ' %' : '');
+  const anexo = (n, t, filtro) => { const s = a.soportes.filter(filtro); return p(`ANEXO ${n}. ${t}`, { b: true, izq: true }) + (s.length ? lista(s.map(x => `${x.nombre}${x.descripcion ? ' — ' + x.descripcion : ''}`)) : p('Sin soportes adjuntos en el periodo.', { i: true, color: '595959', sangria: 360 })); };
+  return [
+    p('INFORME AMBIENTAL DE OBRA', { b: true, centro: true, sz: 28, antes: 400 }),
+    p(`No. ${d.numero}`, { b: true, centro: true, sz: 24 }),
+    p(`(PERIODO: DESDE ${fecha(d.ini).toUpperCase()} HASTA ${fecha(d.fin).toUpperCase()})`, { centro: true }),
+    p([['PROYECTO: ', { b: true }], d.proyecto.nombre || '—'], { centro: true }),
+    p([['CONTRATO DE OBRA Nº ', { b: true }], `${ob?.numero || '—'} · ${ob?.contratista || '—'}`], { centro: true, despues: 300 }),
+    titulo('1.  INTRODUCCIÓN'),
+    p('Informe de seguimiento al Plan de Adaptación de la Guía Ambiental (PAGA) del contrato, elaborado según la Guía de Manejo Ambiental de Proyectos de Infraestructura, modo carretero, del INVÍAS (2022), adoptada por la Resolución 2335 de 2022.'),
+    titulo('2.  GENERALIDADES DEL PROYECTO'),
+    subtitulo('2.1.  DESCRIPCIÓN GENERAL'), p(d.proyecto.objeto || ob?.objeto || '—'),
+    subtitulo('2.2.  LOCALIZACIÓN'), p(d.proyecto.ubicacion || '—'),
+    subtitulo('2.3.  ALCANCE'),
+    d.tramos.length ? tabla(['TRAMO', 'ABSCISA INICIAL', 'ABSCISA FINAL', 'LONGITUD (m)', 'INTERVENCIÓN'], d.tramos.map(t => [t.nombre || '', abscisa(t.abs_ini), abscisa(t.abs_fin), num(Math.abs((t.abs_fin || 0) - (t.abs_ini || 0)), 0), t.actividad || '']), [2, 1.3, 1.3, 1.2, 3])
+      + p(`Longitud total: ${num(d.tramos.reduce((t, x) => t + Math.abs((x.abs_fin || 0) - (x.abs_ini || 0)), 0), 0)} m.`) : p('Sin tramos registrados.', { i: true, color: '595959' }),
+    subtitulo('2.4.  ESTADO DE AVANCE FÍSICO Y AMBIENTAL'),
+    ficha([['Avance físico de obra', d.fisico ? `${num(d.fisico.real)} % (programado ${num(d.fisico.programado)} %)` : '—'], ['Avance ambiental (logro / meta de las fichas)', avanceAmb != null ? num(avanceAmb) + ' %' : 'Sin metas definidas'], ['Ejecución del presupuesto PAGA', totP ? pct(totE, totP) : '—']]),
+    titulo('3.  GESTIÓN AMBIENTAL DEL PERIODO'),
+    subtitulo('3.1.  ACTIVIDADES EJECUTADAS Y FICHA DEL PAGA ASOCIADA'),
+    a.seguimiento.length ? programas.map(pg => { const r = a.seguimiento.filter(s => s.programa === pg); return r.length ? p(pg, { b: true, despues: 60 }) + tabla(['FECHA', 'FICHA', 'ACTIVIDAD', 'INDICADOR', 'META / LOGRO', 'ESTADO'], r.map(s => [fecha(s.fecha), s.ficha || '', s.actividad || '', s.indicador || '', s.meta != null ? `${num(s.meta)} / ${num(s.logro)}` : '', s.estado || '']), [1.3, 1.3, 3, 1.8, 1.2, 1]) : ''; }).join('')
+      : p('Sin actividades registradas en el periodo.', { i: true, color: '595959' }),
+    cuadrosAmbientales(a),
+    subtitulo('3.2.  AVANCES Y MODIFICACIONES AL PAGA'),
+    a.fichas.filter(f => f.notas).length ? lista(a.fichas.filter(f => f.notas).map(f => `${f.codigo}: ${f.notas}`)) : p('Sin modificaciones al PAGA en el periodo.'),
+    subtitulo('3.3.  ANÁLISIS AMBIENTAL DE TRAMOS'),
+    d.tramos.length ? tabla(['TRAMO', 'ABSCISAS', 'AVANCE %', 'NO CONFORMIDADES DEL PERIODO', 'OBSERVACIONES'], d.tramos.map(t => [t.nombre || '', `${abscisa(t.abs_ini)} – ${abscisa(t.abs_fin)}`, num(t.avance), a.chequeo.filter(c => c.cumple === 'No' && c.frente && t.nombre && c.frente.includes(t.nombre)).length, t.notas || '']), [2, 2, 1, 1.6, 3]) : p('Sin tramos registrados.', { i: true, color: '595959' }),
+    subtitulo('3.4.  PERMISOS AMBIENTALES'),
+    a.permisos.length ? tabla(['TIPO DE PERMISO', 'ENTIDAD QUE LO OTORGA', 'ACTO', 'FECHA', 'VENCE', 'ESTADO'], a.permisos.map(x => [x.tipo || '', x.autoridad || '', x.acto || '', fecha(x.fecha), fecha(x.vence), x.estado || '']), [2, 2, 1.6, 1.3, 1.3, 1]) : p('Sin permisos registrados.', { i: true, color: '595959' }),
+    subtitulo('3.5.  PRESUPUESTO DEL PAGA: PROGRAMADO VS. EJECUTADO'),
+    pres.length ? tabla(['PROGRAMA', 'PROGRAMADO', 'EJECUTADO', '%'], [...pres.map(r => [r[0], pesos(r[1]), pesos(r[2]), pct(r[2], r[1])]), ['TOTAL', pesos(totP), pesos(totE), pct(totE, totP)]], [4, 2, 2, 1]) : p('Registre el presupuesto programado y ejecutado en el catálogo de fichas del PAGA.', { i: true, color: '595959' }),
+    titulo('4.  ANEXOS'),
+    anexo(1, 'PERMISOS AMBIENTALES', x => x.tabla === 'amb_permiso'),
+    p('ANEXO 2. MATRIZ DE REQUISITOS LEGALES AMBIENTALES', { b: true, izq: true }),
+    a.requisitos.length ? tabla(['NORMA', 'QUIÉN LA EMITE', 'LINEAMIENTOS', 'FICHA', 'CUMPLE'], a.requisitos.map(r => [r.norma || '', r.emisor || '', r.lineamiento || '', r.ficha || '', r.cumple === 'Sí' ? 'SÍ' : r.cumple === 'No' ? 'NO' : r.cumple || '']), [1.8, 1.6, 3.6, 1.2, 0.8]) : p('Sin requisitos registrados.', { i: true, color: '595959' }),
+    p('ANEXO 3. CRONOGRAMA', { b: true, izq: true }),
+    a.fichas.length ? tabla(['FICHA', 'PERIODICIDAD', 'RESPONSABLE', 'REGISTROS DEL PERIODO'], a.fichas.map(f => [`${f.codigo || ''} ${f.nombre || ''}`, f.periodicidad || '', f.responsable || '', f.registros]), [4, 1.4, 2, 1.2]) : p('Sin catálogo de fichas.', { i: true, color: '595959' }),
+    p('ANEXO 4. PRESUPUESTO', { b: true, izq: true }),
+    a.fichas.some(f => f.presupuesto || f.ejecutado) ? tabla(['FICHA', 'PROGRAMADO', 'EJECUTADO', '%'], a.fichas.filter(f => f.presupuesto || f.ejecutado).map(f => [`${f.codigo} ${f.nombre || ''}`, pesos(f.presupuesto), pesos(f.ejecutado), pct(f.ejecutado || 0, f.presupuesto)]), [4, 2, 2, 1]) : p('Sin presupuesto por ficha.', { i: true, color: '595959' }),
+    anexo(5, 'SOPORTES DEL PERIODO (RCD, FORESTAL, MAQUINARIA, MONITOREOS, CHEQUEOS Y PMT)', x => x.tabla !== 'amb_permiso'),
+    firma(d.director, 'Director de interventoría · Visto bueno del componente ambiental'),
+  ].join('');
+}
+
+const informeAmbiental = d => informeFormato({ ...d, fotos: [], antes_despues: [], titulo_formato: 'INFORME AMBIENTAL DE OBRA (PAGA)' }, null, cuerpoAmbiental);
+
+module.exports = { informeFormato, informeSSTFormato, informeAmbiental, registrarAnexo };
 
