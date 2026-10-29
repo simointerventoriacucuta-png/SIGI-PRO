@@ -47,6 +47,9 @@ const ICONOS = {
   item: I('<path d="M6 9h20M6 15h20M6 21h12"/><path d="M24 19v8M20 23h8"/>'),
   eliminar: I('<path d="M7 9h18M12 9V5h8v4M9 9l1 18h12l1-18M14 14v9M18 14v9"/>', '#c62828'),
   pegar: I('<path d="M10 6h12v4H10z"/><path d="M8 8H6v20h20V8h-2"/><path d="M11 16h10M11 21h10"/>', '#2e7d32'),
+  subir: I('<path d="M16 26V6M8 14l8-8 8 8"/>'),
+  bajar: I('<path d="M16 6v20M8 18l8 8 8-8"/>'),
+  copiar: I('<rect x="10" y="10" width="16" height="18"/><path d="M6 22V4h14"/>'),
   exportar: I('<path d="M6 20v8h20v-8M16 4v16M10 14l6 6 6-6"/>', '#2e7d32'),
   acta: I('<path d="M7 4h18v24H7z"/><path d="M11 10h10M11 15h10M11 20l3 3 6-6"/>'),
   aprobar: I('<circle cx="16" cy="16" r="12"/><path d="M10 16l4 4 8-8"/>', '#2e7d32'),
@@ -69,20 +72,20 @@ const ICONOS = {
 };
 
 // ---------- Estado ----------
-const E = { usuario: null, meta: null, proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
+const E = { deshacer: [], ir: null, filtro: {}, usuario: null, meta: null, proyectos: [], pid: null, res: null, docs: [], activo: null, cinta: 'inicio', sel: null, lateral: 'pendientes' };
 const contrato = tipo => E.res?.contratos.find(c => c.tipo === tipo);
 
 // ---------- Cinta de opciones ----------
 // Grupo de edición del presupuesto: aparece en las pestañas Obra e Interventoría
 const EDITAR_PRES = ['Editar presupuesto', [['Nuevo capítulo', 'capitulo', () => nuevoItem(0), enPresupuesto], ['Nuevo ítem', 'item', () => nuevoItem(1), enPresupuesto],
-  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Importar Excel (.xlsx)', 'pegar', importarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
+  ['Eliminar fila', 'eliminar', eliminarItem, enPresupuesto], ['Subir fila (Alt+↑)', 'subir', () => moverItem(-1), enPresupuesto], ['Bajar fila (Alt+↓)', 'bajar', () => moverItem(1), enPresupuesto], ['Pegar desde Excel', 'pegar', pegarExcel, enPresupuesto], ['Importar Excel (.xlsx)', 'pegar', importarExcel, enPresupuesto], ['Exportar a Excel', 'exportar', exportarPresupuesto, enPresupuesto]]];
 // Documentos del acta: Excel y Word
 const DOC_ACTA = ['Documento del acta', [['Acta en Excel', 'exportar', exportarActa, enActa], ['Acta en Word', 'datos', () => (location.href = `/api/docx/acta/${E.activo.split(':')[1]}`), enActa]]];
 const ab = (tipo, vista) => () => abrir(vista + ':' + contrato(tipo)?.id);
 const CINTA = {
   inicio: ['Inicio', [
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
-    ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
+    ['Seguimiento', [['Calendario', 'vencimiento', () => abrir('calendario')], ['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
     ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente ✦', 'asistente', abrirAsistente], ['Clave del asistente', 'nube', configurarAsistente]]],
     ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
@@ -91,7 +94,7 @@ const CINTA = {
     ['Avance en campo', [['Capturar avance', 'aprobar', capturarAvance], ['Capturas de avance', 'datos', () => abrir('avances')]]],
     ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')], ['Suspensiones', 'vencimiento', ab('obra', 'suspensiones')], ['Liquidación', 'balance', ab('obra', 'liquidacion')]]],
     EDITAR_PRES,
-    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa]]],
+    ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa], ['Copiar acta anterior', 'copiar', copiarAnterior, enActa]]],
     DOC_ACTA,
     ['Programa y plano', [['Programa de obra (Project)', 'balance', () => abrir('programa')], ['Avance en el plano', 'mayores', () => abrir('plano')]]],
     ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')], ['Registro fotográfico', 'datos', () => abrir('fotos')]]],
@@ -103,10 +106,12 @@ const CINTA = {
     ['Facturación', [['Nueva cuenta de cobro', 'acta', () => nuevaActa('interventoria')], ['Balance de facturación', 'balance', ab('interventoria', 'balance')]]],
     DOC_ACTA,
     ['Costos reales', [['Registrar gastos', 'gasto', ab('interventoria', 'gastos')], ['Control de costos', 'costos', ab('interventoria', 'costos')]]],
+    ['Requisiciones', [['Nueva RQ', 'nuevo', () => nuevaRQ()], ['Requisiciones (RQ)', 'datos', () => abrir('requisiciones')]]],
     ['Recursos', [['Personal', 'personal', () => abrir('tabla:personal')], ['Pólizas', 'poliza', () => abrir('tabla:poliza')]]],
   ]],
   control: ['Control de obra', [
-    ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')]]],
+    ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')], ['Matriz de peligros', 'datos', () => abrir('tabla:sst_peligro')], ['Listas de chequeo', 'ensayo', () => abrir('tabla:sst_inspeccion')], ['Informe SST (Word)', 'acta', () => informeSST()]]],
+    ['Anexos SST', [['Permisos y ATS', 'acta', () => abrir('tabla:sst_permiso')], ['Capacitaciones', 'correo', () => abrir('tabla:sst_capacitacion')], ['Trabajadores', 'personal', () => abrir('tabla:sst_trabajador')], ['Entrega de EPP', 'poliza', () => abrir('tabla:sst_epp')], ['PILA / ARL', 'gasto', () => abrir('tabla:sst_seguridad_social')], ['Investigación AT', 'vencimiento', () => abrir('tabla:sst_investigacion')], ['Emergencias', 'balance', () => abrir('tabla:sst_emergencia')], ['Maquinaria', 'costos', () => abrir('tabla:sst_equipo')], ['Comités y cronograma', 'datos', () => abrir('tabla:sst_actividad')], ['Soportes del informe', 'presupuesto', () => abrir('tabla:sst_documento')]]],
     ['Ambiental', [['Fichas PAGA', 'ensayo', () => abrir('tabla:amb_ficha')], ['Requisitos legales', 'poliza', () => abrir('tabla:amb_requisito')], ['Informe ambiental', 'informe', () => informeMensual('informe-ambiental')], ['Seguimiento', 'ensayo', () => abrir('tabla:ambiental')], ['Permisos', 'vencimiento', () => abrir('tabla:amb_permiso')], ['RCD', 'balance', () => abrir('tabla:rcd')], ['Forestal', 'ensayo', () => abrir('tabla:forestal')]]],
     ['Recursos y control ambiental', [['Agua', 'balance', () => abrir('tabla:agua')], ['Maquinaria', 'personal', () => abrir('tabla:maquinaria')], ['Monitoreos', 'ensayo', () => abrir('tabla:monitoreo')], ['Chequeo', 'ensayo', () => abrir('tabla:amb_chequeo')]]],
     ['PMT', [['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')], ['Inspección PMT', 'vencimiento', () => abrir('tabla:pmt_inspeccion')]]],
@@ -142,7 +147,7 @@ if (leerLocal('cinta-plegada')) $('.cinta').classList.add('plegada');
 // Menú Archivo (como la vista Backstage de Office)
 function menuArchivo() {
   const m = $('#menu-archivo');
-  const ops = [['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
+  const ops = [['✦ Leer documento con IA', leerDocumentoIA], null, ['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
     ['Informe mensual (Word)', informeMensual], null, ['Sincronización entre computadores', dialogoSync], ['Usuarios', () => abrir('usuarios')], ['Auditoría', () => abrir('auditoria')], ['Cambiar de usuario', elegirUsuario], null, ['Acerca de SIGI Pro', () => $('#btn-acerca').click()]];
   m.innerHTML = ops.map((o, i) => (o ? `<button data-i="${i}">${o[0]}</button>` : '<hr>')).join('');
   m.hidden = !m.hidden;
@@ -152,6 +157,7 @@ document.addEventListener('click', e => { if (!e.target.closest('#menu-archivo')
 $('#btn-actualizar').onclick = () => refrescar().then(() => aviso('Actualizado'));
 $('#btn-inicio-rapido').onclick = () => abrir('tablero');
 $('#btn-captura').onclick = () => capturarAvance();
+$('#btn-doc-ia').onclick = () => leerDocumentoIA();
 document.addEventListener('keydown', e => { if (e.key === 'F5') { e.preventDefault(); refrescar(); } });
 $('#grupos-cinta').addEventListener('click', e => {
   const b = e.target.closest('.btn-cinta'); if (!b || b.disabled) return;
@@ -163,7 +169,7 @@ function pintarArbol() {
   if (!E.res) return;
   const r = E.res, ob = contrato('obra'), it = contrato('interventoria');
   const n = (clave, texto, nivel = 0, cuenta = '', carpeta = false) => `<div class="nodo ${carpeta ? 'carpeta' : ''} ${E.activo === clave ? 'activo' : ''}" style="--nivel:${nivel}" ${clave ? `data-k="${clave}"` : ''}>${texto}<span class="cuenta">${cuenta}</span></div>`;
-  let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI') + n('fotos', '📷 Registro fotográfico');
+  let h = n('tablero', '📊 Tablero') + n('calendario', '📅 Calendario') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia) + n('graficos', '📊 Gráficos y Power BI') + n('fotos', '📷 Registro fotográfico');
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
     h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length) + n('suspensiones:' + ob.id, '⏸️ Suspensiones', 0, ob.suspendido ? 'suspendido' : ob.suspensiones.length) + n('liquidacion:' + ob.id, '🏁 Liquidación', 0, ob.liquidacion?.estado || '');
@@ -172,7 +178,8 @@ function pintarArbol() {
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('avances', '📍 Capturas de avance', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
     h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:amb_ficha', 'Fichas del PAGA', 1) + n('tabla:amb_requisito', 'Requisitos legales', 1) + n('tabla:ambiental', 'Seguimiento a fichas', 1) + n('tabla:amb_permiso', 'Permisos ambientales', 1) + n('tabla:rcd', 'RCD', 1) + n('tabla:forestal', 'Forestal y compensación', 1) + n('tabla:agua', 'Consumo de agua', 1) + n('tabla:maquinaria', 'Maquinaria y emisiones', 1) + n('tabla:monitoreo', 'Monitoreos', 1) + n('tabla:amb_chequeo', 'Lista de chequeo', 1) + n('tabla:pmt', 'PMT (tránsito)', 1) + n('tabla:pmt_inspeccion', 'Inspecciones al PMT', 1)
       + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
-      + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1);
+      + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1)
+      + SST_ANEXOS.map(t => n('tabla:' + t, TABLAS[t].titulo.replace('SST · ', ''), 1)).join('');
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
   if (it) {
@@ -180,7 +187,7 @@ function pintarArbol() {
     h += n('', '📁 Cuentas de cobro', 0, it.actas.length, true) + it.actas.map(a => n('acta:' + a.id, `Cuenta ${a.numero}`, 1, a.estado)).join('');
     h += n('gastos:' + it.id, '💵 Gastos reales', 0) + n('costos:' + it.id, '🎯 Control de costos', 0);
     h += n('tabla:personal', '👷 Personal', 0, r.conteos.personal) + n('tabla:poliza', '🛡️ Pólizas', 0, r.conteos.poliza);
-    h += n('balance:' + it.id, '📈 Balance de facturación', 0);
+    h += n('balance:' + it.id, '📈 Balance de facturación', 0) + n('requisiciones', '🧾 Requisiciones (RQ)', 0, r.rq_pendientes || '');
   }
   $('#arbol').innerHTML = h;
 }
@@ -194,16 +201,18 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance',
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', calendario: 'Calendario', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance', requisiciones: 'Requisiciones (RQ)', rq: 'RQ ' + (E.rqNum?.[x] ?? ''),
     suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
 function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
-  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', amb_ficha: 'control', amb_requisito: 'control', amb_permiso: 'control', rcd: 'control', forestal: 'control', agua: 'control', maquinaria: 'control', monitoreo: 'control', amb_chequeo: 'control', pmt_inspeccion: 'control', social: 'control' }[x];
+  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'control'])), ambiental: 'control', pmt: 'control', ...Object.fromEntries(AMB_TABLAS.map(t => [t, 'control'])), social: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
+  if (t === 'requisiciones' || t === 'rq') return 'interventoria';
+  if (t === 'calendario') return 'inicio';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
   return E.res?.contratos.find(c => String(c.id) === x)?.tipo;
 }
@@ -234,8 +243,12 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, calendario: vCalendario, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion, requisiciones: vRequisiciones, rq: vRQ }[t];
+    const sc = cont.querySelector('.grilla-cont')?.scrollTop, scDoc = cont.scrollTop, mismo = pintarDocs.ult === E.activo;
     await vista(cont, x);
+    herramientasGrilla(cont);
+    if (mismo) { const g = cont.querySelector('.grilla-cont'); if (g && sc) g.scrollTop = sc; cont.scrollTop = scDoc; }
+    pintarDocs.ult = E.activo;
     marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
@@ -254,15 +267,123 @@ function editable(cont, alGuardar) {
     let hecho = false;
     const fin = async guardar => {
       if (hecho) return; hecho = true;
-      if (guardar && campo.value !== valor) { try { await alGuardar(td, tipo === 'num' ? num(campo.value) : campo.value); aviso('Guardado'); } catch (er) { aviso('Error: ' + er.message); } }
-      pintarDocs(); if (guardar) refrescarSilencioso();
+      if (guardar && campo.value !== valor) {
+        try {
+          await alGuardar(td, tipo === 'num' ? num(campo.value) : campo.value); aviso('Guardado · Ctrl+Z deshace');
+          // Pila de deshacer: se vuelve a guardar el valor anterior en la misma celda
+          E.deshacer.push({ vista: E.activo, nombre: td.dataset.c, fn: () => alGuardar(td, tipo === 'num' ? num(valor) : valor) });
+          if (E.deshacer.length > 50) E.deshacer.shift();
+        } catch (er) { aviso('Error: ' + er.message); }
+      }
+      await pintarDocs(); if (guardar) refrescarSilencioso();
+      if (E.ir) { const { id, c } = E.ir; E.ir = null; $(`#contenido-doc tr[data-id="${id}"] td.edit[data-c="${c}"]`)?.click(); }
+    };
+    // Enter/flechas: celda de abajo o de arriba en la misma columna; Tab: siguiente celda editable de la fila
+    const mover = ev => {
+      const tr = td.closest('tr'), filas = [...tr.parentNode.querySelectorAll('tr[data-id]')].filter(f => !f.hidden);
+      let dest = null;
+      if (ev.key === 'Tab') {
+        const celdas = [...tr.querySelectorAll('td.edit')], k = celdas.indexOf(td) + (ev.shiftKey ? -1 : 1);
+        dest = celdas[k] || null;
+      } else {
+        const paso = ev.key === 'ArrowUp' || (ev.key === 'Enter' && ev.shiftKey) ? -1 : 1;
+        for (let k = filas.indexOf(tr) + paso; k >= 0 && k < filas.length; k += paso) { const x = filas[k].querySelector(`td.edit[data-c="${td.dataset.c}"]`); if (x) { dest = x; break; } }
+      }
+      if (dest) E.ir = { id: dest.closest('tr').dataset.id, c: dest.dataset.c };
     };
     campo.addEventListener('blur', () => fin(true));
-    campo.addEventListener('keydown', ev => { if (ev.key === 'Enter') campo.blur(); if (ev.key === 'Escape') fin(false); });
+    campo.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') return fin(false);
+      if (ev.key === 'Enter' || ev.key === 'Tab' || (tipo !== 'select' && tipo !== 'date' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp'))) { ev.preventDefault(); mover(ev); campo.blur(); }
+    });
   });
 }
 async function refrescarSilencioso() { E.res = await api('resumen/' + E.pid); pintarArbol(); pintarLateral(); estadoProyecto(); }
 window.celda = (v, campo, tipo = 'text', extra = '') => `<td class="edit ${tipo === 'num' ? 'num' : ''}" data-c="${campo}" data-tipo="${tipo}" data-v="${esc(v ?? '')}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
+
+// ---------- Herramientas de toda grilla: buscar con resaltado, Excel, imprimir ----------
+function herramientasGrilla(cont) {
+  const g = cont.querySelector('.grilla-cont'); if (!g || cont.querySelector('.barra-grilla')) return;
+  const tabla = g.querySelector('table'), clave = E.activo;
+  const barra = document.createElement('div'); barra.className = 'barra-grilla';
+  barra.innerHTML = `<input type="search" class="buscar-grilla" placeholder="Filtrar filas… (Ctrl+F)" value="${esc(E.filtro[clave] || '')}"><span class="sub cuenta-grilla"></span><span class="esp"></span>
+    <button class="btn" data-h="excel" title="Descargar lo que se ve en la grilla como hoja de Excel (CSV)">⬇ Excel</button><button class="btn" data-h="imprimir" title="Imprimir esta vista">🖨 Imprimir</button>`;
+  g.before(barra);
+  const inp = barra.querySelector('input');
+  inp.oninput = () => { E.filtro[clave] = inp.value; filtrarGrilla(tabla, inp.value, barra.querySelector('.cuenta-grilla')); };
+  barra.onclick = e => { const b = e.target.closest('[data-h]'); if (!b) return; b.dataset.h === 'excel' ? excelGrilla(tabla) : window.print(); };
+  if (inp.value) inp.oninput();
+}
+function filtrarGrilla(tabla, texto, cuenta) {
+  const q = texto.trim().toLowerCase(), filas = [...tabla.tBodies[0].rows];
+  tabla.querySelectorAll('mark').forEach(m => m.replaceWith(m.textContent)); tabla.normalize();
+  let cap = null, capVisible = false, n = 0;
+  const cerrarCap = () => { if (cap) cap.hidden = !(capVisible || !q || cap.textContent.toLowerCase().includes(q)); };
+  for (const f of filas) {
+    if (f.classList.contains('cap')) { cerrarCap(); cap = f; capVisible = false; continue; }
+    const ok = !q || f.textContent.toLowerCase().includes(q);
+    f.hidden = !ok; if (ok) { capVisible = true; n++; }
+  }
+  cerrarCap();
+  if (q) for (const f of filas) if (!f.hidden) resaltar(f, q);
+  if (cuenta) cuenta.textContent = q ? `${n} fila(s) coinciden` : '';
+}
+function resaltar(nodo, q) {
+  const w = document.createTreeWalker(nodo, NodeFilter.SHOW_TEXT), lista = [];
+  while (w.nextNode()) if (w.currentNode.nodeValue.toLowerCase().includes(q)) lista.push(w.currentNode);
+  for (const t of lista) {
+    const v = t.nodeValue, i = v.toLowerCase().indexOf(q), m = document.createElement('mark');
+    m.textContent = v.slice(i, i + q.length);
+    const resto = t.splitText(i); resto.nodeValue = resto.nodeValue.slice(q.length); resto.before(m);
+  }
+}
+// Exporta las filas visibles (con subtotales y pie) a CSV que Excel abre con separador ;
+function excelGrilla(tabla) {
+  const celdaTxt = c => { const v = c.textContent.trim().replace(/^[●]\s*/, '').replace(/^\$\s*/, '').replace(/\s*%$/, ''); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  const lineas = ['sep=;'];
+  for (const f of tabla.rows) {
+    if (f.hidden) continue;
+    const out = []; for (const c of f.cells) { out.push(celdaTxt(c)); for (let k = 1; k < (c.colSpan || 1); k++) out.push(''); }
+    lineas.push(out.join(';'));
+  }
+  descargar(`${tituloDoc(E.activo).replace(/[^\wáéíóúñÁÉÍÓÚÑ.-]+/g, '_')}.csv`, '﻿' + lineas.join('\r\n'));
+}
+// Ctrl+Z deshace el último cambio hecho en una celda; Ctrl+F va al filtro de la grilla
+document.addEventListener('keydown', async e => {
+  if (!(e.ctrlKey || e.metaKey) || $('#dialogo').open) return;
+  const k = e.key.toLowerCase();
+  if (k === 'f' && $('#contenido-doc .buscar-grilla')) { e.preventDefault(); $('#contenido-doc .buscar-grilla').focus(); }
+  if (k === 'z' && !e.target.closest('input,textarea,select')) {
+    e.preventDefault();
+    const u = E.deshacer.pop(); if (!u) return aviso('Nada que deshacer');
+    try { await u.fn(); aviso('Deshecho: ' + u.nombre); if (E.activo !== u.vista) abrir(u.vista); else await pintarDocs(); refrescarSilencioso(); } catch (er) { aviso('No se pudo deshacer: ' + er.message); }
+  }
+});
+
+// Valor en letras (pesos colombianos), como se escribe en actas y cuentas de cobro
+function enLetras(valor) {
+  const U = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISÉIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE',
+    'VEINTE', 'VEINTIÚN', 'VEINTIDÓS', 'VEINTITRÉS', 'VEINTICUATRO', 'VEINTICINCO', 'VEINTISÉIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE'];
+  const D = ['', '', '', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+  const C = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+  const menorMil = n => {
+    if (n === 100) return 'CIEN';
+    const r = n % 100, dec = r < 30 ? U[r] : D[Math.floor(r / 10)] + (r % 10 ? ' Y ' + U[r % 10] : '');
+    return [C[Math.floor(n / 100)], dec].filter(Boolean).join(' ');
+  };
+  const miles = n => { const m = Math.floor(n / 1000), r = n % 1000; return [m === 1 ? 'MIL' : m ? menorMil(m) + ' MIL' : '', r ? menorMil(r) : ''].filter(Boolean).join(' '); };
+  const entero = n => {
+    if (n === 0) return 'CERO';
+    const b = Math.floor(n / 1e12), mi = Math.floor(n / 1e6) % 1e6, r = n % 1e6;
+    return [b ? (b === 1 ? 'UN BILLÓN' : miles(b) + ' BILLONES') : '', mi ? (mi === 1 ? 'UN MILLÓN' : miles(mi) + ' MILLONES') : '', r ? miles(r) : ''].filter(Boolean).join(' ');
+  };
+  const v = Math.round(Math.abs(Number(valor) || 0) * 100), ent = Math.floor(v / 100), cts = v % 100;
+  const t = entero(ent), de = ent && !(ent % 1e6) ? ' DE' : '';
+  return (valor < 0 ? 'MENOS ' : '') + t + de + (ent === 1 ? ' PESO' : ' PESOS') + (cts ? ` CON ${entero(cts)} CENTAVOS` : '') + ' M/CTE';
+}
+window.enLetras = enLetras;
+// Semáforo del % ejecutado: verde hasta 90 %, ámbar hasta 100 %, rojo si supera lo contratado
+const semaforo = p => `<span class="semaforo ${p > 1 + 1e-9 ? 'rojo' : p >= 0.9 ? 'ambar' : p > 0 ? 'verde' : ''}" title="${p > 1 + 1e-9 ? 'Supera lo contratado' : p >= 0.9 ? 'Cerca del límite contratado' : 'Dentro de lo contratado'}">●</span>`;
 
 // ---------- Vistas ----------
 async function vTablero(cont) {
@@ -271,7 +392,9 @@ async function vTablero(cont) {
   const avOb = ob?.presupuesto ? ob.ejecutado / ob.presupuesto : 0, avIt = it?.presupuesto ? it.ejecutado / it.presupuesto : 0;
   const pGas = it?.costo_directo ? it.gastado / it.costo_directo : 0;
   const prox = r.vencimientos.filter(v => v.fecha).slice(0, 6);
+  const est = await estadoContrato(r);
   cont.innerHTML = `<h2>${esc(r.proyecto.nombre)}</h2><p class="sub">${esc(r.proyecto.objeto || '')}</p>
+  ${est}
   <div class="seccion obra">EJECUCIÓN DE OBRA · ${esc(ob?.contratista || 'contratista')}</div>
   <div class="tarjetas">
     ${tarj('Presupuesto de obra', ob?.presupuesto ? pesos(ob.presupuesto) : 'Sin precios', ob ? ob.items + ' ítems · AIU ' + fmt(ob.aiu_a, 0) + '/' + fmt(ob.aiu_i, 0) + '/' + fmt(ob.aiu_u, 0) : '')}
@@ -287,11 +410,70 @@ async function vTablero(cont) {
     ${tarj('Utilidad a la fecha', pesos((it?.ejecutado || 0) - (it?.gastado || 0)), 'Facturado − gastado (antes de impuestos)')}
   </div>
   <div class="dos-col">
-    <div class="caja"><h3>Próximos vencimientos</h3>${prox.length ? `<table class="grilla"><tbody>${prox.map(v => { const d = dias(v.fecha);
+    <div class="caja"><h3>Próximos vencimientos <button class="btn" data-abrir="calendario" style="float:right">📅 Ver calendario</button></h3>${prox.length ? `<table class="grilla"><tbody>${prox.map(v => { const d = dias(v.fecha);
       return `<tr><td>${fechaLarga(v.fecha)}</td><td class="${d < 0 || d <= 3 ? 'malo' : ''}">${d < 0 ? 'Vencido hace ' + -d + ' d' : d === 0 ? 'Hoy' : 'En ' + d + ' d'}</td><td>${esc(v.descripcion)}</td></tr>`; }).join('')}</tbody></table>` : '<p class="sub">No hay vencimientos con fecha.</p>'}
       <p class="sub">${r.vencimientos.filter(v => !v.fecha).length} pendientes sin fecha · ver panel derecho</p></div>
     <div class="caja"><h3>Avance del contrato de obra por acta</h3>${curva(ob)}</div>
   </div>`;
+  cont.querySelectorAll('[data-abrir]').forEach(tr => tr.addEventListener('click', () => abrir(tr.dataset.abrir)));
+}
+// ---------- Estado del contrato de un vistazo (indicadores) ----------
+const SEM = { verde: 'Al día', amarillo: 'Atención', rojo: 'Crítico', gris: 'Sin datos' };
+const luz = s => `<span class="luz ${s}" title="${SEM[s]}"></span>`;
+const mesCorto = m => ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'][+m.slice(5, 7) - 1] + ' ' + m.slice(2, 4);
+async function estadoContrato(r) {
+  let d; try { d = await api('indicadores/' + E.pid); } catch { return ''; }
+  const e = d.evm, p = d.plazo, f1 = v => (v == null ? '—' : fmt(v, 1) + ' %'), f2 = v => (v == null ? '—' : fmt(v, 2));
+  const spiV = e.spi ?? e.spi_programa;
+  const barraP = (et, v, c) => `<div class="fila-barra"><span>${et}</span><div><i style="width:${Math.min(100, v || 0)}%;background:${c}"></i></div><b>${f1(v)}</b></div>`;
+  const tarjS = (et, v, s, no) => `<div class="tarjeta sem-${s}"><div class="et">${et}</div><div class="va">${luz(s)} ${f2(v)}</div><div class="no">${no}</div></div>`;
+  const lista = (filas, vacio) => (filas.length ? `<table class="grilla"><tbody>${filas.join('')}</tbody></table>` : `<p class="sub">${vacio}</p>`);
+  const sst = d.sst;
+  return `<div class="seccion obra">ESTADO DEL CONTRATO DE OBRA · corte ${fechaLarga(d.hoy)}</div>
+  <div class="tarjetas">
+    ${tarjS('SPI · cumplimiento del programa', spiV, e.semaforo_spi, e.spi != null ? `EV / PV = actas ${pesos(e.ev)} / programado ${pesos(e.pv)}` : e.spi_programa != null ? 'Avance real / programado (Project)' : 'Importe el programa de Project para calcularlo')}
+    ${tarjS('CPI · físico vs facturado', e.cpi, e.semaforo_cpi, e.cpi != null ? `EV físico ${pesos(e.ev_fisico)} / facturado ${pesos(e.ac)}` : 'Requiere programa con avance real y actas')}
+    <div class="tarjeta"><div class="et">Plazo vigente</div><div class="va">${p.dias_total ? p.dias_restantes + ' d restantes' : '—'}</div><div class="no">${p.dias_total ? `${p.dias_transcurridos} de ${p.dias_total} días · termina ${fechaLarga(p.fin)}` : 'Sin acta de inicio o terminación'}${p.suspendido ? ' · <b class="malo">SUSPENDIDO</b>' : ''}</div></div>
+    <div class="tarjeta"><div class="et">Variación del cronograma (SV)</div><div class="va ${e.sv == null ? '' : e.sv < 0 ? 'malo' : 'bueno'}">${e.sv == null ? '—' : pesos(e.sv)}</div><div class="no">EV − PV · negativo = atraso</div></div>
+  </div>
+  <div class="dos-col">
+    <div class="caja"><h3>Curva S · programado vs ejecutado</h3>${curvaS(d.curva, e)}</div>
+    <div class="caja"><h3>Tiempo, avance físico y financiero</h3><div class="barras">
+      ${barraP('Plazo transcurrido', p.pct_tiempo, '#90a4ae')}${barraP('Programado (Project)', e.programado_pct, '#b26a00')}${barraP('Físico real (Project)', p.pct_fisico, 'var(--verde)')}${barraP('Financiero (actas)', p.pct_financiero, 'var(--azul)')}</div>
+      <p class="sub">${p.pct_tiempo != null && p.pct_financiero != null ? (p.pct_financiero + 10 < p.pct_tiempo ? '⚠ El avance financiero va más de 10 puntos por debajo del tiempo transcurrido.' : 'El avance financiero acompaña el tiempo transcurrido.') : 'Faltan fechas o valor para comparar.'}
+      ${p.pct_fisico != null && p.pct_financiero != null && p.pct_financiero > p.pct_fisico + 5 ? ' ⚠ Se ha facturado más de lo ejecutado físicamente.' : ''}</p>
+      <h3>Por capítulo</h3>${barras(d.capitulos.map(c => ({ n: c.capitulo, v: c.pct || 0 })), v => fmt(v, 1) + ' %')}</div>
+  </div>
+  <div class="tres-col">
+    <div class="caja"><h3>Alertas (${d.alertas.length})</h3>${lista(d.alertas.slice(0, 8).map(a => { const x = dias(a.fecha); return `<tr data-abrir="${esc(a.abrir)}" class="clic"><td class="${x != null && x <= 0 ? 'malo' : ''}">${fechaLarga(a.fecha)}</td><td>${esc(a.tipo)}</td><td>${esc(a.texto)}</td></tr>`; }), 'Sin alertas en los próximos 7 días.')}</div>
+    <div class="caja"><h3>Pólizas por vencer (30 días)</h3>${lista(d.polizas.map(x => { const y = dias(x.hasta); return `<tr data-abrir="tabla:poliza" class="clic"><td class="${y < 0 ? 'malo' : y <= 15 ? 'malo' : ''}">${y < 0 ? 'Vencida' : 'En ' + y + ' d'}</td><td>${esc(x.amparo || '')}</td><td>${esc(x.contrato || '')} ${esc(x.numero || '')}</td></tr>`; }), 'Ninguna póliza vence en los próximos 30 días.')}</div>
+    <div class="caja"><h3>PQRS</h3><div class="va-grande ${d.pqrs.vencidas ? 'malo' : ''}">${d.pqrs.abiertas} abiertas</div><p class="sub">${d.pqrs.vencidas} vencidas · ${d.pqrs.total} en total · plazo 15 días hábiles (Ley 1755 de 2015)</p>
+      ${lista(d.pqrs.lista.map(s => `<tr data-abrir="tabla:social" class="clic"><td>${fechaLarga(s.fecha)}</td><td>${esc(s.descripcion || '')}</td><td class="${s.plazo && s.plazo < d.hoy ? 'malo' : ''}">${s.plazo ? fechaLarga(s.plazo) : ''}</td></tr>`), '')}</div>
+    <div class="caja"><h3>SST ${sst ? '· ' + sst.mes : ''}</h3>${sst ? `<table class="grilla"><tbody>
+      <tr><td>Trabajadores</td><td class="num">${sst.trabajadores || 0}</td></tr><tr><td>Frecuencia de accidentalidad</td><td class="num ${sst.frecuencia > 0 ? 'malo' : 'bueno'}">${fmt(sst.frecuencia, 2)}</td></tr>
+      <tr><td>Severidad</td><td class="num">${fmt(sst.severidad, 2)}</td></tr><tr><td>Mortalidad</td><td class="num ${sst.mortalidad > 0 ? 'malo' : ''}">${fmt(sst.mortalidad, 2)}</td></tr>
+      <tr><td>Ausentismo (%)</td><td class="num">${fmt(sst.ausentismo, 2)}</td></tr><tr><td>Planillas PILA/ARL</td><td class="${sst.planillas_ok === 'Sí' ? 'bueno' : 'malo'}">${esc(sst.planillas_ok || '')}</td></tr></tbody></table>
+      <p class="sub">Res. 0312 de 2019 · por cada 100 trabajadores</p>` : '<p class="sub">Sin indicadores SST registrados.</p>'}</div>
+    <div class="caja"><h3>Capturas de avance · últimos 7 días (${d.capturas.length})</h3>
+      ${d.fotos.length ? `<div class="miniaturas">${d.fotos.map(f => `<img src="/api/adjunto/${f.id}/archivo" alt="${esc(f.descripcion || f.nombre || '')}" title="${esc((f.fecha || '') + ' ' + (f.descripcion || ''))}" loading="lazy">`).join('')}</div>` : ''}
+      ${lista(d.capturas.slice(0, 6).map(c => `<tr data-abrir="avances" class="clic"><td>${fechaLarga(c.fecha)}</td><td>${esc(c.codigo || '')} ${esc(c.frente || '')}</td><td class="num">${fmt(c.cantidad, 2)} ${esc(c.unidad || '')}</td></tr>`), 'Sin capturas de campo esta semana.')}</div>
+  </div>`;
+}
+// Curva S mensual en SVG: programado (Project), ejecutado por actas y avance real del programa a hoy; barras = valor de actas del mes
+function curvaS(c, e) {
+  if (!c.length) return '<p class="sub">Registre las fechas del contrato de obra, el programa de Project o las actas para ver la curva S.</p>';
+  const W = 560, H = 230, m = 36, n = c.length, x = i => m + (i + 0.5) * (W - m - 12) / n, y = v => H - 22 - Math.min(100, v) / 100 * (H - 44);
+  const maxMes = Math.max(1, ...c.map(k => k.valor_actas_mes)), bw = Math.max(2, Math.min(18, (W - m) / n - 3));
+  const linea = (k, col, dash = '') => { const pts = c.map((v, i) => (v[k] == null ? null : `${x(i)},${y(v[k])}`)); const seg = pts.filter(Boolean); return seg.length ? `<polyline points="${seg.join(' ')}" fill="none" stroke="${col}" stroke-width="2" ${dash}/>` : ''; };
+  const paso = Math.ceil(n / 8), iHoy = c.findIndex(k => k.mes === hoyISO().slice(0, 7));
+  const ejes = [0, 25, 50, 75, 100].map(v => `<line x1="${m}" x2="${W - 12}" y1="${y(v)}" y2="${y(v)}" stroke="#eee"/><text x="${m - 4}" y="${y(v) + 3}" text-anchor="end">${v}%</text>`).join('');
+  const barrasM = c.map((k, i) => (k.valor_actas_mes ? `<rect x="${x(i) - bw / 2}" y="${H - 22 - k.valor_actas_mes / maxMes * 50}" width="${bw}" height="${k.valor_actas_mes / maxMes * 50}" fill="#9db8da"><title>${mesCorto(k.mes)}: ${pesos(k.valor_actas_mes)}</title></rect>` : '')).join('');
+  const etiq = c.map((k, i) => (i % paso === 0 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${mesCorto(k.mes)}</text>` : '')).join('');
+  const puntos = c.map((k, i) => (k.ejecutado_actas_pct != null ? `<circle cx="${x(i)}" cy="${y(k.ejecutado_actas_pct)}" r="2.5" fill="#1f5fa8"><title>${mesCorto(k.mes)} · ejecutado ${fmt(k.ejecutado_actas_pct, 1)} %${k.programado_pct != null ? ' · programado ' + fmt(k.programado_pct, 1) + ' %' : ''}</title></circle>` : '')).join('');
+  const real = iHoy >= 0 && e.real_pct != null ? `<rect x="${x(iHoy) - 4}" y="${y(e.real_pct) - 4}" width="8" height="8" fill="#2e7d32" transform="rotate(45 ${x(iHoy)} ${y(e.real_pct)})"><title>Avance real del programa: ${fmt(e.real_pct, 1)} %</title></rect>` : '';
+  const hoyL = iHoy >= 0 ? `<line x1="${x(iHoy)}" x2="${x(iHoy)}" y1="${y(100)}" y2="${H - 22}" stroke="#c62828" stroke-dasharray="3"/><text x="${x(iHoy) + 3}" y="${y(100) + 9}" fill="#c62828">hoy</text>` : '';
+  return `<svg class="curva" viewBox="0 0 ${W} ${H}" role="img" aria-label="Curva S">${ejes}${barrasM}${hoyL}${linea('programado_pct', '#b26a00', 'stroke-dasharray="5 3"')}${linea('ejecutado_actas_pct', '#1f5fa8')}${puntos}${real}${etiq}</svg>
+  <p class="sub leyenda"><i style="background:#b26a00"></i>Programado (Project) <i style="background:#1f5fa8"></i>Ejecutado por actas <i style="background:#2e7d32"></i>Real del programa a hoy <i style="background:#9db8da"></i>Valor de actas del mes</p>`;
 }
 function curva(c) {
   if (!c || !c.actas.length) return '<p class="sub">Aún no hay actas de obra.</p>';
@@ -341,16 +523,37 @@ async function vPresupuesto(cont, id) {
   for (const it of d.items) if (it.tipo === 1 && it.padre_id) subt[it.padre_id] = (subt[it.padre_id] || 0) + it.cantidad * it.vr_unitario;
   cont.innerHTML = `<h2>Presupuesto · contrato de ${d.contrato.tipo === 'obra' ? 'obra' : 'interventoría'} ${esc(d.contrato.numero || '')}</h2>
   <p class="sub">${esc(d.contrato.contratista || '')} · clic en una celda para editar · seleccione una fila para insertar debajo o eliminar</p>
-  <div class="grilla-cont"><table class="grilla" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
+  <div class="grilla-cont"><table class="grilla congelar" id="g-pres"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario</th><th class="num">Vr. total</th><th>Fuera AIU</th><th class="num">Cant. vigente</th><th class="num">Vr. vigente</th><th></th></tr></thead><tbody>
   ${d.items.map(it => it.tipo === 0
     ? `<tr class="cap ${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}<td></td><td></td><td></td><td class="num">${pesos(subt[it.id] || 0)}</td><td></td><td></td><td></td><td></td></tr>`
     : `<tr class="${E.sel === it.id ? 'sel' : ''}" data-id="${it.id}">${celda(it.codigo, 'codigo')}${celda(it.descripcion, 'descripcion')}${celda(it.unidad, 'unidad')}${celda(it.cantidad, 'cantidad', 'num')}${celda(it.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(it.cantidad * it.vr_unitario)}</td>${celda(it.sin_aiu ? 'Sí' : 'No', 'sin_aiu', 'select', 'data-op="No|Sí"')}<td class="num" ${it.cantidad_vigente !== it.cantidad ? 'style="color:#b26a00;font-weight:600"' : ''}>${fmt(it.cantidad_vigente)}</td><td class="num">${pesos(it.cantidad_vigente * it.vr_unitario)}</td><td>${it.otrosi_id || it.apu ? `<button class="btn" data-apu="${it.id}">APU</button>` : ''}</td></tr>`).join('')}
-  </tbody></table></div>
+  </tbody><tfoot><tr><td></td><td>${d.items.filter(i => i.tipo === 1).length} ítems · costo directo ${pesos(d.totales.costo_directo)}</td><td></td><td></td><td>TOTAL</td><td class="num">${pesos(d.totales.total)}</td><td></td><td>Vigente</td><td class="num">${pesos(d.totales_vigentes.total)}</td><td></td></tr></tfoot></table></div>
   <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Presupuesto original</h3>${tablaTotales(d.totales)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Vigente (con otrosíes firmados)</h3>${tablaTotales(d.totales_vigentes)}</div></div>`;
   const g = $('#g-pres');
   g.addEventListener('click', e => { const b = e.target.closest('[data-apu]'); if (b) editorApu(d.items.find(i => i.id === Number(b.dataset.apu))); });
   g.addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr && !e.target.closest('td.edit input')) { E.sel = Number(tr.dataset.id); g.querySelectorAll('tr.sel').forEach(x => x.classList.remove('sel')); tr.classList.add('sel'); } });
   editable(g, (td, v) => api('t/item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: td.dataset.c === 'sin_aiu' ? (v === 'Sí' ? 1 : 0) : v }));
+  g.tabIndex = 0;
+  g.addEventListener('keydown', e => { if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.target.closest('input,select')) { e.preventDefault(); moverItem(e.key === 'ArrowUp' ? -1 : 1); } });
+}
+// Subir o bajar el ítem seleccionado dentro de su capítulo, o el capítulo completo con sus ítems
+async function moverItem(paso) {
+  if (!E.sel) return aviso('Seleccione primero una fila');
+  const cid = Number(E.activo.split(':')[1]), items = (await api('presupuesto/' + cid)).items;
+  const sel = items.find(i => i.id === E.sel); if (!sel) return;
+  let grupos;
+  if (sel.tipo === 0) {
+    // Capítulos con sus ítems; el orden final se reparte en el mismo orden de la lista
+    grupos = items.filter(i => i.tipo === 0).map(c => [c, ...items.filter(i => i.tipo === 1 && i.padre_id === c.id)]);
+  } else grupos = items.filter(i => i.tipo === 1 && i.padre_id === sel.padre_id).map(i => [i]);
+  const k = grupos.findIndex(b => b[0].id === sel.id), j = k + paso;
+  if (j < 0 || j >= grupos.length) return aviso('Ya está en el extremo');
+  const ordenes = grupos.flat().map(i => i.orden).sort((a, b) => a - b);
+  [grupos[k], grupos[j]] = [grupos[j], grupos[k]];
+  const unicos = new Set(ordenes).size === ordenes.length;
+  const cambios = grupos.flat().map((it, n) => [it, unicos ? ordenes[n] : ordenes[0] + n * 0.001]).filter(([it, o]) => it.orden !== o);
+  try { for (const [it, o] of cambios) await api('t/item/' + it.id, 'PUT', { orden: o }); await pintarDocs(); aviso(paso < 0 ? 'Fila subida' : 'Fila bajada'); }
+  catch (e) { aviso('Error: ' + e.message); }
 }
 async function nuevoItem(tipo) {
   const cid = Number(E.activo.split(':')[1]);
@@ -407,6 +610,10 @@ async function vActa(cont, id) {
   // Acta aprobada o posterior: celdas de solo lectura
   const celda = bloq ? (v, c, tipo = 'text', extra = '') => `<td class="${tipo === 'num' ? 'num' : ''}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>` : window.celda;
   const t = d.totales;
+  // Subtotales por capítulo (contratado, esta acta y acumulado)
+  const sc = {};
+  for (const f of d.filas) if (f.tipo === 1 && f.padre_id) { const s = sc[f.padre_id] ||= { a: 0, ac: 0, c: 0 }; s.a += f.vr_acta; s.ac += f.vr_acumulado; s.c += f.cantidad_vigente * f.vr_unitario; }
+  const it1 = d.filas.filter(f => f.tipo === 1), sum = k => it1.reduce((s, f) => s + (f[k] || 0), 0), contratado = it1.reduce((s, f) => s + f.cantidad_vigente * f.vr_unitario, 0);
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${esObra ? 'Acta parcial de obra' : 'Cuenta de cobro de interventoría'} N.º ${a.numero}</h2><span class="esp"></span><button class="btn clip" data-adj="acta:${a.id}">📎 Soportes y fotos</button></div>
   <p class="sub">${esc(d.contrato.contratista || '')} · contrato ${esc(d.contrato.numero || '')}</p>
   <table class="grilla" id="g-acta-cab" style="max-width:900px;margin-bottom:10px"><tbody><tr>
@@ -419,19 +626,43 @@ async function vActa(cont, id) {
     <div class="tarjeta"><div class="et">Acumulado con esta acta</div><div class="va">${pesos(t.acumulado.total)}</div></div>
     <div class="tarjeta"><div class="et">Ítems con mayor cantidad</div><div class="va">${d.filas.filter(f => f.tipo === 1 && f.saldo < -1e-9).length}</div><div class="no">Acumulado superior a lo contratado</div></div>
   </div>
-  <div class="grilla-cont"><table class="grilla" id="g-acta"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Vr. unit.</th><th class="num">Anterior</th>
+  <div class="grilla-cont"><table class="grilla congelar" id="g-acta"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada</th><th class="num">Vr. unit.</th><th class="num">Anterior</th>
     <th class="num">Presentada</th><th class="num">Aprobada</th><th class="num">Acumulada</th><th class="num">Saldo</th><th class="num">% ejec.</th><th class="num">Vr. esta acta</th><th class="num">Vr. acumulado</th><th>Observación</th></tr></thead><tbody>
-  ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="13">${esc(f.descripcion)}</td></tr>`
+  ${d.filas.map(f => f.tipo === 0 ? `<tr class="cap"><td>${esc(f.codigo)}</td><td colspan="9">${esc(f.descripcion)}</td><td class="num">${sc[f.id]?.c ? pct(sc[f.id].ac / sc[f.id].c) : ''}</td><td class="num">${pesos(sc[f.id]?.a || 0)}</td><td class="num">${pesos(sc[f.id]?.ac || 0)}</td><td></td></tr>`
     : `<tr data-id="${f.id}" class="${f.saldo < -1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num" title="Original ${fmt(f.cantidad)}">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.vr_unitario)}</td>
       <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
-      <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
-  </tbody></table></div>
-  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>`;
+      <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${semaforo(f.pct)} ${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
+  </tbody><tfoot><tr><td></td><td>Costo directo · presentado ${pesos(sum('vr_presentado'))}</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num">${contratado ? pct(sum('vr_acumulado') / contratado) : ''}</td><td class="num">${pesos(sum('vr_acta'))}</td><td class="num">${pesos(sum('vr_acumulado'))}</td><td></td></tr></tfoot></table></div>
+  <p class="letras"><b>Valor de esta ${esObra ? 'acta' : 'cuenta'}:</b> ${pesos(t.acta.total)} · SON: ${enLetras(t.acta.total)}</p>  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
+  <h3 style="font-size:13px;margin:16px 0 4px">Lista de chequeo documental <span class="sub" id="chequeo-res"></span></h3>
+  <div id="chequeo-acta"></div>`;
+  pintarChequeo(id, bloq);
   editable($('#g-acta'), (td, v) => api(`acta/${id}/item/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   editable($('#g-acta-cab'), (td, v) => api('t/acta/' + id, 'PUT', { [td.dataset.c]: v }));
   $('#pasos-acta').onclick = async e => {
     const b = e.target.closest('.paso'); if (!b || b.disabled || !confirm(`¿Pasar el acta ${a.numero} a "${b.dataset.e}"?`)) return;
     try { await api('t/acta/' + id, 'PUT', { estado: b.dataset.e }); aviso('Estado: ' + b.dataset.e); await refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+  };
+}
+// Lista de chequeo documental: sin todos los obligatorios en "Cumple" o "No aplica" no se aprueba el acta
+async function pintarChequeo(id, bloq, ch) {
+  ch = ch || await api(`acta/${id}/chequeo`);
+  const cont = $('#chequeo-acta'); if (!cont) return;
+  $('#chequeo-res').textContent = ch.completo ? '· completa: se puede aprobar' : `· faltan ${ch.faltan} obligatorios para aprobar`;
+  const color = { Cumple: '#1b7a3a', 'No cumple': '#b3261e', 'No aplica': '#666', Pendiente: '#b26a00' };
+  cont.innerHTML = `<div class="grilla-cont"><table class="grilla" id="g-chequeo"><thead><tr><th>#</th><th>Requisito</th><th>Oblig.</th><th>Estado</th><th>Radicado / folio / enlace SECOP II</th><th>Observación</th>${bloq ? '' : '<th></th>'}</tr></thead><tbody>
+  ${ch.filas.map((f, k) => `<tr data-r="${f.id}"><td>${k + 1}</td><td>${esc(f.requisito)}</td><td>${f.obligatorio ? 'Sí' : 'No'}</td>
+    <td>${bloq ? `<span style="color:${color[f.estado]}">${esc(f.estado)}</span>` : `<select data-c="estado" style="color:${color[f.estado]}">${ch.estados.map(e => `<option ${e === f.estado ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>`}</td>
+    <td>${bloq ? esc(f.referencia ?? '') : `<input data-c="referencia" value="${esc(f.referencia ?? '')}">`}</td>
+    <td>${bloq ? esc(f.observacion ?? '') : `<input data-c="observacion" value="${esc(f.observacion ?? '')}">`}</td>
+    ${bloq ? '' : '<td><button type="button" data-borrar title="Quitar requisito">✕</button></td>'}</tr>`).join('')}
+  </tbody></table></div>${bloq ? '' : '<button type="button" id="chequeo-nuevo" style="margin-top:6px">+ Requisito</button>'}`;
+  if (bloq) return;
+  const guardar = async (rid, metodo, cuerpo) => { try { pintarChequeo(id, bloq, await api(`acta/${id}/chequeo/${rid}`, metodo, cuerpo)); } catch (er) { aviso('Error: ' + er.message); } };
+  cont.onchange = e => { const c = e.target.dataset.c; if (c) guardar(e.target.closest('tr').dataset.r, 'PUT', { [c]: e.target.value }); };
+  cont.onclick = e => {
+    if (e.target.closest('[data-borrar]') && confirm('¿Quitar este requisito?')) guardar(e.target.closest('tr').dataset.r, 'DELETE');
+    if (e.target.id === 'chequeo-nuevo') { const r = prompt('Nuevo requisito:'); if (r) api(`acta/${id}/chequeo`, 'POST', { requisito: r }).then(x => pintarChequeo(id, bloq, x)).catch(er => aviso('Error: ' + er.message)); }
   };
 }
 async function nuevaActa(tipo) {
@@ -646,22 +877,91 @@ function barras(datos, formato = pesos) {
   const max = Math.max(1, ...datos.map(d => Math.abs(d.v)));
   return `<div class="barras">${datos.map(d => `<div class="fila-barra"><span>${esc(d.n)}</span><div><i style="width:${(Math.abs(d.v) / max) * 100}%;background:${d.c || 'var(--azul)'}"></i></div><b>${formato(d.v)}</b></div>`).join('') || '<p class="sub">Sin datos</p>'}</div>`;
 }
+// Columnas agrupadas en SVG: etiquetas + series [{ n, c, v: [] }]
+function columnas(etq, series, formato = pesos) {
+  if (!etq.length || !series.some(s => s.v.some(Boolean))) return '<p class="sub">Sin datos</p>';
+  const W = 560, H = 200, m = 8, n = etq.length, k = series.length, max = Math.max(1, ...series.flatMap(s => s.v.map(v => v || 0)));
+  const ancho = (W - 2 * m) / n, bw = Math.max(2, Math.min(20, (ancho - 4) / k)), y = v => H - 22 - (v || 0) / max * (H - 40), paso = Math.ceil(n / 8);
+  const rects = etq.map((e, i) => series.map((s, j) => (s.v[i] ? `<rect x="${m + i * ancho + (ancho - bw * k) / 2 + j * bw}" y="${y(s.v[i])}" width="${bw - 1}" height="${H - 22 - y(s.v[i])}" fill="${s.c}"><title>${esc(e)} · ${esc(s.n)}: ${formato(s.v[i])}</title></rect>` : '')).join('')
+    + (i % paso === 0 ? `<text x="${m + i * ancho + ancho / 2}" y="${H - 6}" text-anchor="middle">${esc(e)}</text>` : '')).join('');
+  return `<svg class="columnas" viewBox="0 0 ${W} ${H}"><text x="${m}" y="10">Máx. ${formato(max)}</text><line x1="${m}" x2="${W - m}" y1="${H - 22}" y2="${H - 22}" stroke="#ccc"/>${rects}</svg>
+  <p class="sub leyenda">${series.map(s => `<i style="background:${s.c}"></i>${esc(s.n)}`).join(' ')}</p>`;
+}
 async function vGraficos(cont) {
   const ob = contrato('obra'), it = contrato('interventoria');
-  const [prog, ind] = await Promise.all([api('programa/' + E.pid), api('sst-indicadores/' + E.pid)]);
+  const vacio = { evm: {}, curva: [], capitulos: [], sst_meses: [], capturas_mes: [] };
+  const [prog, d] = await Promise.all([api('programa/' + E.pid).catch(() => ({})), api('indicadores/' + E.pid).catch(() => vacio)]);
   const base = location.origin + '/api/bi/' + E.pid + '/';
-  const conjuntos = ['contratos', 'actas', 'items', 'gastos', 'programa', 'tramos', 'sst', 'sst_indicadores', 'ambiental', 'pmt', 'social'];
+  const conjuntos = [['contratos', 'Contratos y valores vigentes'], ['actas', 'Actas y cuentas de cobro'], ['items', 'Ítems con acumulado y saldo'], ['capitulos', 'Avance por capítulo'], ['curva_s', 'Curva S mensual (PV, EV, % programado y ejecutado)'],
+    ['valor_ganado', 'Valor ganado a hoy: SPI, CPI, plazo'], ['gastos', 'Gastos de interventoría'], ['programa', 'Programa de obra (Project)'], ['tramos', 'Tramos'], ['capturas_mes', 'Capturas de avance por mes'],
+    ['polizas', 'Pólizas'], ['alertas', 'Alertas de 7 días'], ['sst', 'SST'], ['sst_indicadores', 'Indicadores SST por mes'], ['ambiental', 'Ambiental'], ['pmt', 'PMT'], ['social', 'Social y PQRS']];
+  const meses = d.curva.filter(k => k.valor_actas_mes || k.valor_interventoria_mes);
   cont.innerHTML = `<h2>Gráficos y datos para Power BI</h2>
   <div class="dos-col">
-    <div><h3 class="h3">Valor por acta de obra</h3>${barras((ob?.actas || []).map(a => ({ n: 'Acta ' + a.numero, v: a.valor })))}</div>
-    <div><h3 class="h3">Cuentas de cobro de interventoría</h3>${barras((it?.actas || []).map(a => ({ n: 'Cuenta ' + a.numero, v: a.valor, c: '#2e7d32' })))}</div>
-    <div><h3 class="h3">Ejecución de los contratos</h3>${barras([ob && { n: 'Obra ejecutado', v: ob.ejecutado }, ob && { n: 'Obra vigente', v: ob.valor_vigente, c: '#90a4ae' }, it && { n: 'Interv. facturado', v: it.ejecutado, c: '#2e7d32' }, it && { n: 'Interv. gastado', v: it.gastado, c: '#b26a00' }, it && { n: 'Interv. vigente', v: it.valor_vigente, c: '#90a4ae' }].filter(Boolean))}</div>
-    <div><h3 class="h3">Programa de obra</h3>${barras([{ n: 'Programado', v: prog.programado, c: '#90a4ae' }, { n: 'Ejecutado', v: prog.real }], v => fmt(v, 1) + ' %')}</div>
-    <div><h3 class="h3">SST · frecuencia de accidentalidad</h3>${barras(ind.map(m => ({ n: m.mes, v: m.frecuencia || 0, c: '#c62828' })), v => fmt(v, 2))}</div>
+    <div class="caja"><h3>Curva S del contrato de obra</h3>${curvaS(d.curva, d.evm)}</div>
+    <div class="caja"><h3>Valor facturado por mes</h3>${columnas(meses.map(k => mesCorto(k.mes)), [{ n: 'Actas de obra', c: '#1f5fa8', v: meses.map(k => k.valor_actas_mes) }, { n: 'Cuentas de interventoría', c: '#2e7d32', v: meses.map(k => k.valor_interventoria_mes) }])}</div>
+    <div class="caja"><h3>Contratado vs ejecutado por capítulo (costo directo)</h3>${columnas(d.capitulos.map(c => c.capitulo.slice(0, 14)), [{ n: 'Contratado', c: '#90a4ae', v: d.capitulos.map(c => c.contratado) }, { n: 'Ejecutado', c: '#1f5fa8', v: d.capitulos.map(c => c.ejecutado) }])}
+      ${barras(d.capitulos.map(c => ({ n: c.capitulo, v: c.pct || 0 })), v => fmt(v, 1) + ' %')}</div>
+    <div class="caja"><h3>Ejecución de los contratos</h3>${barras([ob && { n: 'Obra ejecutado', v: ob.ejecutado }, ob && { n: 'Obra vigente', v: ob.valor_vigente, c: '#90a4ae' }, it && { n: 'Interv. facturado', v: it.ejecutado, c: '#2e7d32' }, it && { n: 'Interv. gastado', v: it.gastado, c: '#b26a00' }, it && { n: 'Interv. vigente', v: it.valor_vigente, c: '#90a4ae' }].filter(Boolean))}
+      <h3>Programa de obra</h3>${barras([{ n: 'Programado', v: prog.programado || 0, c: '#90a4ae' }, { n: 'Ejecutado', v: prog.real || 0 }], v => fmt(v, 1) + ' %')}</div>
+    <div class="caja"><h3>Valor por acta de obra</h3>${barras((ob?.actas || []).map(a => ({ n: 'Acta ' + a.numero, v: a.valor })))}
+      <h3>Cuentas de cobro de interventoría</h3>${barras((it?.actas || []).map(a => ({ n: 'Cuenta ' + a.numero, v: a.valor, c: '#2e7d32' })))}</div>
+    <div class="caja"><h3>Capturas de avance en campo por mes</h3>${columnas(d.capturas_mes.map(k => mesCorto(k.mes)), [{ n: 'Capturas', c: '#b26a00', v: d.capturas_mes.map(k => k.capturas) }], v => fmt(v, 0))}</div>
+    <div class="caja"><h3>SST · frecuencia y severidad por mes</h3>${columnas(d.sst_meses.map(m => mesCorto(m.mes)), [{ n: 'Frecuencia', c: '#c62828', v: d.sst_meses.map(m => m.frecuencia) }, { n: 'Severidad', c: '#b26a00', v: d.sst_meses.map(m => m.severidad) }], v => fmt(v, 2))}</div>
   </div>
   <h3 class="h3" style="margin-top:18px">Conectar Power BI</h3>
-  <p class="sub">En Power BI Desktop: <b>Obtener datos → Web</b>, pegue una de estas direcciones y pulse Aceptar. Con SIGI Pro abierto, <b>Actualizar</b> trae los datos al día. Para tableros compartidos en la nube, active la sincronización con Turso o exporte el CSV.</p>
-  <table class="grilla" style="max-width:900px"><tbody>${conjuntos.map(c => `<tr><td>${c}</td><td><code>${esc(base + c + '.csv')}</code></td><td><a href="${base + c}.csv">Descargar CSV</a></td></tr>`).join('')}</tbody></table>`;
+  <p class="sub">En Power BI Desktop: <b>Obtener datos → Web</b>, pegue una de estas direcciones y pulse Aceptar. Con SIGI Pro abierto, <b>Actualizar</b> trae los datos al día. Cambie <code>.csv</code> por <code>.json</code> si lo prefiere. Para tableros compartidos en la nube, active la sincronización con Turso o exporte el CSV.</p>
+  <table class="grilla" style="max-width:1000px"><tbody>${conjuntos.map(([c, t]) => `<tr><td>${c}</td><td>${t}</td><td><code>${esc(base + c + '.csv')}</code></td><td><a href="${base + c}.csv">Descargar CSV</a></td></tr>`).join('')}</tbody></table>`;
+}
+
+// ---------- Calendario del proyecto ----------
+const TIPOS_CAL = { Vencimiento: '#c62828', Póliza: '#6a1b9a', PQRS: '#d84315', Correspondencia: '#00838f', PMT: '#f9a825', Acta: '#1f5fa8', Contrato: '#174a85', Otrosí: '#5d4037',
+  Suspensión: '#455a64', Liquidación: '#880e4f', Social: '#ef6c00', Bitácora: '#6d4c41', Captura: '#2e7d32', Programa: '#b26a00', Ensayo: '#0277bd', SST: '#ad1457', Ambiental: '#558b2f' };
+const isoL = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const lunes = d => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
+async function vCalendario(cont) {
+  const C = E.cal = E.cal || { modo: 'mes', ref: hoyISO(), ocultos: [] };
+  const ref = new Date(C.ref + 'T00:00:00');
+  let ini, fin, titulo;
+  if (C.modo === 'semana') { ini = lunes(ref); fin = new Date(ini); fin.setDate(fin.getDate() + 6); titulo = `Semana del ${fechaLarga(isoL(ini))}`; }
+  else if (C.modo === 'agenda') { ini = new Date(ref); fin = new Date(ref); fin.setDate(fin.getDate() + 59); titulo = `Agenda · ${fechaLarga(isoL(ini))} a ${fechaLarga(isoL(fin))}`; }
+  else { const p = new Date(ref.getFullYear(), ref.getMonth(), 1); ini = lunes(p); fin = new Date(ini); fin.setDate(fin.getDate() + 41); titulo = p.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }); titulo = titulo[0].toUpperCase() + titulo.slice(1); }
+  let ev = [];
+  try { ev = await api(`calendario/${E.pid}?desde=${isoL(ini)}&hasta=${isoL(fin)}`); } catch (e) { aviso('Error: ' + e.message); }
+  const vis = ev.filter(e => !C.ocultos.includes(e.tipo)), hoy = hoyISO(), porDia = {};
+  for (const e of vis) (porDia[e.fecha] = porDia[e.fecha] || []).push(e);
+  const chip = e => `<div class="ev ${e.vencido ? 'vencido' : ''}" data-abrir="${esc(e.abrir)}" style="--c:${TIPOS_CAL[e.tipo] || '#777'}" title="${esc(e.tipo + ': ' + e.titulo + (e.vencido ? ' (vencido)' : ''))}">${esc(e.titulo)}</div>`;
+  const dia = (d, max) => { const f = isoL(d), l = porDia[f] || [], otro = C.modo === 'mes' && d.getMonth() !== ref.getMonth();
+    return `<div class="dia ${f === hoy ? 'hoy' : ''} ${otro ? 'otro' : ''}" data-dia="${f}"><div class="num-dia">${C.modo === 'semana' ? d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' }) : d.getDate()}</div>${l.slice(0, max).map(chip).join('')}${l.length > max ? `<div class="mas" data-mas="${f}">+${l.length - max} más</div>` : ''}</div>`; };
+  const dias = n => Array.from({ length: n }, (_, i) => { const d = new Date(ini); d.setDate(d.getDate() + i); return d; });
+  const cab = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map(x => `<div class="cab-dia">${x}</div>`).join('');
+  const cuerpo = C.modo === 'agenda'
+    ? (Object.keys(porDia).sort().map(f => `<div class="agenda-dia ${f === hoy ? 'hoy' : ''}"><b>${new Date(f + 'T00:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</b>${porDia[f].map(e => `<div class="fila-ag" data-abrir="${esc(e.abrir)}"><span class="pt" style="background:${TIPOS_CAL[e.tipo]}"></span><span class="tipo">${esc(e.tipo)}</span><span class="${e.vencido ? 'malo' : ''}">${esc(e.titulo)}${e.vencido ? ' · vencido' : ''}</span></div>`).join('')}</div>`).join('') || '<p class="sub">No hay eventos en los próximos 60 días.</p>')
+    : `<div class="cal-grilla ${C.modo}">${cab}${dias(C.modo === 'semana' ? 7 : 42).map(d => dia(d, C.modo === 'semana' ? 40 : 3)).join('')}</div>`;
+  const cuenta = t => ev.filter(e => e.tipo === t).length;
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Calendario del proyecto</h2><span class="esp"></span>
+    <button class="btn" data-mover="-1">◀</button><button class="btn" data-mover="0">Hoy</button><button class="btn" data-mover="1">▶</button>
+    ${['mes', 'semana', 'agenda'].map(m => `<button class="btn ${C.modo === m ? 'prim' : ''}" data-modo="${m}">${m[0].toUpperCase() + m.slice(1)}</button>`).join('')}
+    <a class="btn" href="/api/calendario/${E.pid}/ics" download title="Para Google Calendar, Outlook o el calendario del celular">📅 Exportar .ics</a></div>
+  <h3 class="cal-titulo">${esc(titulo)} <span class="sub">· ${vis.length} eventos${ev.some(e => e.vencido) ? ` · <b class="malo">${ev.filter(e => e.vencido).length} vencidos</b>` : ''}</span></h3>
+  <div class="cal-leyenda">${Object.keys(TIPOS_CAL).map(t => `<label><input type="checkbox" data-tipo="${t}" ${C.ocultos.includes(t) ? '' : 'checked'}><i style="background:${TIPOS_CAL[t]}"></i>${t}${cuenta(t) ? ` (${cuenta(t)})` : ''}</label>`).join('')}</div>
+  ${cuerpo}
+  <p class="sub">Clic en un evento para abrir su documento · clic en un día libre para crear un vencimiento · los pendientes con fecha pasada salen en rojo.</p>`;
+  cont.onclick = async e => {
+    const a = e.target.closest('[data-abrir]'); if (a) return abrir(a.dataset.abrir);
+    const m = e.target.closest('[data-mover]');
+    if (m) { const k = +m.dataset.mover, d = new Date(C.ref + 'T00:00:00');
+      if (!k) C.ref = hoyISO(); else { if (C.modo === 'mes') d.setMonth(d.getMonth() + k, 1); else d.setDate(d.getDate() + k * (C.modo === 'semana' ? 7 : 60)); C.ref = isoL(d); }
+      return vCalendario(cont); }
+    const mo = e.target.closest('[data-modo]'); if (mo) { C.modo = mo.dataset.modo; return vCalendario(cont); }
+    const mas = e.target.closest('[data-mas]'); if (mas) { C.modo = 'semana'; C.ref = mas.dataset.mas; return vCalendario(cont); }
+    const d = e.target.closest('[data-dia]');
+    if (d && !e.target.closest('.ev')) {
+      const t = prompt(`Nuevo vencimiento para el ${fechaLarga(d.dataset.dia)}:`); if (!t || !t.trim()) return;
+      try { await api('t/vencimiento', 'POST', { proyecto_id: E.pid, fecha: d.dataset.dia, descripcion: t.trim(), tipo: 'Recordatorio', estado: 'Pendiente' }); aviso('Vencimiento creado'); refrescarSilencioso(); vCalendario(cont); } catch (er) { aviso('Error: ' + er.message); }
+    }
+  };
+  cont.querySelectorAll('[data-tipo]').forEach(c => c.onchange = () => { C.ocultos = c.checked ? C.ocultos.filter(x => x !== c.dataset.tipo) : [...C.ocultos, c.dataset.tipo]; vCalendario(cont); });
 }
 
 // ---------- Suspensiones y reinicios ----------
@@ -683,6 +983,79 @@ async function vSuspensiones(cont, cid) {
   $('#s-nueva').onclick = async () => { try { await api('t/suspension', 'POST', { contrato_id: c.id, fecha_suspension: hoyISO(), estado: 'Suspendido' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 const diasSusp = x => { const fin = x.estado === 'Reiniciado' && x.fecha_reinicio ? x.fecha_reinicio : hoyISO(); return x.fecha_suspension ? Math.max(0, Math.round((new Date(fin) - new Date(x.fecha_suspension)) / 86400000)) : 0; };
+
+// ---------- Requisiciones (RQ) ----------
+// Flujo: Borrador → Solicitada → Aprobada / Rechazada → Atendida. Aprueba o rechaza el director; al atender una RQ del contrato de interventoría se registra el gasto.
+const COLOR_RQ = { Borrador: '#666', Solicitada: '#b26a00', Aprobada: '#1f5fa8', Rechazada: '#b3261e', Atendida: '#1b7a3a' };
+const tipoContrato = id => { const c = E.res?.contratos.find(c => c.id === id); return c ? (c.tipo === 'obra' ? 'Obra' : 'Interventoría') : '—'; };
+async function nuevaRQ() {
+  const it = contrato('interventoria') || contrato('obra');
+  try { const r = await api('t/requisicion', 'POST', { proyecto_id: E.pid, contrato_id: it?.id || null, fecha: hoyISO(), estado: 'Borrador' }); (E.rqNum = E.rqNum || {})[r.id] = r.numero; abrir('rq:' + r.id); aviso('RQ ' + r.numero + ' creada'); }
+  catch (e) { aviso('Error: ' + e.message); }
+}
+async function vRequisiciones(cont) {
+  const lista = await api('t/requisicion?proyecto_id=' + E.pid);
+  E.rqNum = Object.fromEntries(lista.map(r => [r.id, r.numero]));
+  const cuenta = e => lista.filter(r => r.estado === e).length;
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Requisiciones (RQ)</h2><span class="esp"></span><button class="btn prim" id="rq-nueva">+ Nueva RQ</button></div>
+  <div class="tarjetas">${['Borrador', 'Solicitada', 'Aprobada', 'Rechazada', 'Atendida'].map(e => `<div class="tarjeta"><div class="et">${e}</div><div class="va" style="color:${COLOR_RQ[e]}">${cuenta(e)}</div></div>`).join('')}</div>
+  <div class="grilla-cont"><table class="grilla" id="g-rq"><thead><tr><th>N.º</th><th>Fecha</th><th>Contrato</th><th>Solicitante</th><th>Frente</th><th>Justificación</th><th>Estado</th><th></th></tr></thead><tbody>
+  ${lista.map(r => `<tr data-rq="${r.id}" style="cursor:pointer"><td>${r.numero}</td><td>${esc(r.fecha || '')}</td><td>${tipoContrato(r.contrato_id)}</td><td>${esc(r.solicitante || '')}</td><td>${esc(r.frente || '')}</td><td>${esc(r.justificacion || '')}</td><td style="color:${COLOR_RQ[r.estado]};font-weight:600">${esc(r.estado)}</td><td class="acciones"><button class="btn clip" data-adj="requisicion:${r.id}" title="Adjuntos">📎</button></td></tr>`).join('') || '<tr><td colspan="8" class="sub">Sin requisiciones</td></tr>'}
+  </tbody></table></div>
+  <p class="sub">El director aprueba o rechaza las RQ solicitadas; la campana avisa las pendientes. Al atender una RQ del contrato de interventoría se crea el gasto en "Gastos reales".</p>`;
+  $('#rq-nueva').onclick = nuevaRQ;
+  $('#g-rq').onclick = e => { const tr = e.target.closest('[data-rq]'); if (tr && !e.target.closest('[data-adj]')) abrir('rq:' + tr.dataset.rq); };
+}
+async function vRQ(cont, id) {
+  const d = await api('requisicion/' + id), r = d.requisicion;
+  (E.rqNum = E.rqNum || {})[r.id] = r.numero;
+  const abierta = ['Borrador', 'Solicitada'].includes(r.estado);
+  const ro = (v, c, tipo = 'text') => `<td class="${tipo === 'num' ? 'num' : ''}">${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
+  const celda = abierta ? window.celda : ro;
+  const c = E.res.contratos.find(x => x.id === r.contrato_id) || null;
+  const pres = c ? (await api('presupuesto/' + c.id)).items.filter(x => x.tipo === 1) : [];
+  const PASOS = { Borrador: ['Solicitada'], Solicitada: ['Aprobada', 'Rechazada', 'Borrador'], Aprobada: ['Atendida', 'Solicitada'], Rechazada: ['Borrador'], Atendida: ['Aprobada'] }[r.estado] || [];
+  const etiqueta = { Solicitada: r.estado === 'Borrador' ? 'Solicitar' : 'Devolver a solicitada', Aprobada: r.estado === 'Atendida' ? 'Reabrir (quitar atención)' : 'Aprobar', Rechazada: 'Rechazar', Borrador: 'Devolver a borrador', Atendida: 'Marcar atendida' };
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Requisición N.º ${r.numero}</h2> <b style="margin-left:10px;color:${COLOR_RQ[r.estado]}">${esc(r.estado)}</b><span class="esp"></span>
+    <button class="btn clip" data-adj="requisicion:${r.id}">📎 Adjuntos</button><button class="btn" id="rq-xlsx">Excel</button><button class="btn" id="rq-docx">Word</button></div>
+  <table class="grilla" id="g-rq-cab" style="max-width:900px;margin-bottom:10px"><tbody>
+    <tr><th>Fecha</th>${celda(r.fecha, 'fecha', 'date')}<th>Contrato</th>${abierta ? `<td><select id="rq-contrato">${E.res.contratos.map(x => `<option value="${x.id}" ${x.id === r.contrato_id ? 'selected' : ''}>${x.tipo === 'obra' ? 'Obra' : 'Interventoría'} ${esc(x.numero || '')}</option>`).join('')}</select></td>` : `<td>${tipoContrato(r.contrato_id)}</td>`}</tr>
+    <tr><th>Solicitante</th>${celda(r.solicitante, 'solicitante')}<th>Frente</th>${celda(r.frente, 'frente')}</tr>
+    <tr><th>Justificación</th>${celda(r.justificacion, 'justificacion').replace('<td', '<td colspan="3"')}</tr>
+    ${r.aprobado_por ? `<tr><th>Aprobada por</th><td colspan="3">${esc(r.aprobado_por)} · ${esc(r.fecha_aprobacion || '')}</td></tr>` : ''}
+    ${r.estado === 'Rechazada' ? `<tr><th>Motivo del rechazo</th><td colspan="3">${esc(r.motivo_rechazo || '')}</td></tr>` : ''}
+    ${['Aprobada', 'Atendida'].includes(r.estado) ? `<tr><th>Proveedor</th>${window.celda(r.proveedor, 'proveedor')}<th>Factura / orden</th>${window.celda(r.documento, 'documento')}</tr>` : ''}
+    ${r.estado === 'Atendida' ? `<tr><th>Atendida</th><td colspan="3">${esc(r.fecha_atencion || '')}${r.gasto_id ? ' · gasto registrado en el contrato de interventoría' : ''}</td></tr>` : ''}
+  </tbody></table>
+  <div class="barra-herr" id="rq-pasos">${PASOS.map(e => `<button class="btn ${e === 'Aprobada' || (e === 'Solicitada' && r.estado === 'Borrador') ? 'prim' : ''}" data-e="${e}">${etiqueta[e]}</button>`).join('')}</div>
+  <div class="grilla-cont"><table class="grilla" id="g-rq-items"><thead><tr><th>Ítem del presupuesto</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario estimado</th><th class="num">Vr. total</th>${abierta ? '<th></th>' : ''}</tr></thead><tbody>
+  ${d.items.map(x => `<tr data-id="${x.id}"><td>${abierta ? `<select data-item><option value="">—</option>${pres.map(p => `<option value="${p.id}" ${p.id === x.item_id ? 'selected' : ''}>${esc(((p.codigo || '') + ' ' + p.descripcion).slice(0, 60))}</option>`).join('')}</select>` : esc(x.item_codigo || '')}</td>
+    ${celda(x.descripcion, 'descripcion')}${celda(x.unidad, 'unidad')}${celda(x.cantidad, 'cantidad', 'num')}${celda(x.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(x.total)}</td>${abierta ? `<td><button class="btn" data-borrar="${x.id}">✕</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="7" class="sub">Sin ítems</td></tr>'}
+  <tr class="cap"><td></td><td>TOTAL ESTIMADO</td><td></td><td></td><td></td><td class="num">${pesos(d.total)}</td>${abierta ? '<td></td>' : ''}</tr>
+  </tbody></table></div>${abierta ? '<button class="btn" id="rq-item" style="margin-top:6px">+ Ítem</button>' : ''}`;
+  const err = er => aviso('Error: ' + er.message);
+  editable($('#g-rq-cab'), (td, v) => api('t/requisicion/' + id, 'PUT', { [td.dataset.c]: v }));
+  if (abierta) editable($('#g-rq-items'), (td, v) => api('t/requisicion_item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  $('#rq-xlsx').onclick = () => (location.href = '/api/xlsx/requisicion/' + id);
+  $('#rq-docx').onclick = () => (location.href = '/api/docx/requisicion/' + id);
+  if ($('#rq-contrato')) $('#rq-contrato').onchange = e => api('t/requisicion/' + id, 'PUT', { contrato_id: Number(e.target.value) }).then(pintarDocs).catch(err);
+  if ($('#rq-item')) $('#rq-item').onclick = () => api('t/requisicion_item', 'POST', { requisicion_id: r.id, cantidad: 1 }).then(pintarDocs).catch(err);
+  $('#g-rq-items').addEventListener('change', e => {
+    if (!e.target.matches('[data-item]')) return;
+    const p = pres.find(p => String(p.id) === e.target.value), tr = e.target.closest('tr');
+    const cambio = { item_id: p ? p.id : null };
+    if (p && !tr.querySelector('[data-c="descripcion"]').dataset.v) Object.assign(cambio, { descripcion: p.descripcion, unidad: p.unidad, vr_unitario: p.vr_unitario });
+    api('t/requisicion_item/' + tr.dataset.id, 'PUT', cambio).then(pintarDocs).catch(err);
+  });
+  $('#g-rq-items').addEventListener('click', e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Quitar este ítem?')) api('t/requisicion_item/' + b.dataset.borrar, 'DELETE').then(pintarDocs).catch(err); });
+  $('#rq-pasos').onclick = async e => {
+    const b = e.target.closest('[data-e]'); if (!b) return;
+    const cambio = { estado: b.dataset.e };
+    if (b.dataset.e === 'Rechazada') { const m = prompt('Motivo del rechazo:'); if (!m) return; cambio.motivo_rechazo = m; }
+    else if (!confirm(`¿${etiqueta[b.dataset.e]} la RQ ${r.numero}?`)) return;
+    try { await api('t/requisicion/' + id, 'PUT', cambio); aviso('RQ ' + r.numero + ': ' + b.dataset.e); await refrescar(); } catch (er) { err(er); }
+  };
+}
 
 // ---------- Liquidación del contrato ----------
 async function vLiquidacion(cont, cid) {
@@ -761,7 +1134,7 @@ async function subirArchivos(lista, tabla, registroId) {
 async function dialogoAdjuntos(tabla, id) {
   const pintar = async () => {
     const lista = await api(`adjuntos/${E.pid}?tabla=${tabla}&registro_id=${id}`);
-    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', 'ambiental', 'social', 'pmt', 'rcd', 'forestal', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion', 'maquinaria', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
+    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', ...SST_ANEXOS, 'ambiental', 'social', 'pmt', ...AMB_TABLAS, 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
       <div class="adjuntos">${lista.map(miniatura).join('') || '<p class="sub">Aún no hay archivos. También puede arrastrarlos a esta ventana.</p>'}</div>
       <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
     const caja = $('#dialogo-form');
@@ -968,6 +1341,10 @@ function informeMensual(ruta) {
   if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
   location.href = `/api/docx/${ruta}/${E.pid}?mes=${mes.trim()}`;
 }
+async function copiarAnterior() {
+  if (!confirm('¿Copiar las cantidades aprobadas del acta anterior a los ítems que en esta acta aún están en cero?')) return;
+  try { const r = await api(`acta/${E.activo.split(':')[1]}/copiar-anterior`, 'POST'); await refrescar(); aviso(`${r.items} ítem(s) copiados del acta ${r.desde}`); } catch (e) { aviso('Error: ' + e.message); }
+}
 function exportarActa() { location.href = `/api/xlsx/acta/${E.activo.split(':')[1]}`; }
 
 // Balance y mayores/menores
@@ -988,10 +1365,13 @@ async function vMayores(cont, id) {
   if (!c.actas.length) return (cont.innerHTML = '<h2>Mayores y menores cantidades</h2><p class="sub">Se calcula con las actas aprobadas; aún no hay actas.</p>');
   const d = await api('acta/' + c.actas[c.actas.length - 1].id);
   const filas = d.filas.filter(f => f.tipo === 1);
+  let may = 0, men = 0, sinJ = 0;
+  for (const f of filas) { const v = (f.acumulado - f.cantidad_vigente) * f.vr_unitario; v > 0 ? (may += v) : (men += v); if (f.acumulado - f.cantidad_vigente > 1e-9 && !f.justificacion) sinJ++; }
   cont.innerHTML = `<h2>Mayores y menores cantidades</h2><p class="sub">Acumulado aprobado hasta el acta ${d.acta.numero} frente a lo contratado vigente (original + otrosíes firmados)</p>
-  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Contratada vigente</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th></tr></thead><tbody>
-  ${filas.map(f => { const dif = f.acumulado - f.cantidad_vigente; return `<tr class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td></tr>`; }).join('')}
-  </tbody></table></div>`;
+  <div class="grilla-cont"><table class="grilla"><thead><tr><th>Código</th><th>Descripción</th><th>Und</th><th class="num">Contratada original</th><th class="num">Contratada vigente</th><th class="num">Ejecutada</th><th class="num">Mayor (+) / menor (−)</th><th class="num">Vr. unitario</th><th class="num">Vr. diferencia</th><th>Justificación técnica</th></tr></thead><tbody>
+  ${filas.map(f => { const dif = f.acumulado - f.cantidad_vigente; return `<tr data-id="${f.id}" class="${dif > 1e-9 ? 'alerta' : ''}"><td>${esc(f.codigo)}</td><td>${esc(f.descripcion)}</td><td>${esc(f.unidad)}</td><td class="num">${fmt(f.cantidad)}</td><td class="num">${fmt(f.cantidad_vigente)}</td><td class="num">${fmt(f.acumulado)}</td><td class="num ${dif > 0 ? 'malo' : ''}">${semaforo(f.pct)} ${fmt(dif)}</td><td class="num">${fmt(f.vr_unitario)}</td><td class="num">${pesos(dif * f.vr_unitario)}</td>${celda(f.justificacion, 'justificacion', 'text', dif > 1e-9 && !f.justificacion ? 'style="background:#fff3e0" title="Mayor cantidad sin justificar"' : '')}</tr>`; }).join('')}
+  </tbody><tfoot><tr><td></td><td>Mayores ${pesos(may)} · menores ${pesos(men)} · mayores sin justificar: ${sinJ}</td><td></td><td></td><td></td><td></td><td></td><td></td><td class="num">${pesos(may + men)}</td><td></td></tr></tfoot></table></div>`;
+  editable(cont.querySelector('table.grilla'), (td, v) => api('t/item/' + td.closest('tr').dataset.id, 'PUT', { justificacion: v }));
 }
 
 // Gastos reales del contrato propio
@@ -1036,7 +1416,43 @@ async function vCostos(cont, cid) {
 // Tablas sencillas (control y registros)
 const ESTADOS = { vencimiento: 'Pendiente|En trámite|Cumplido|Vencido', personal: 'Propuesto|Aprobado|Vinculado|Por vincular|Retirado',
   poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada',
-  sst: 'Abierto|En seguimiento|Cerrado', ambiental: 'Abierto|En seguimiento|Cerrado', amb_chequeo: 'Abierto|En seguimiento|Cerrado', amb_permiso: 'En trámite|Vigente|Vencido|Negado|Cerrado', forestal: 'Inventariado|Autorizado|Intervenido|Compensado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+  sst: 'Abierto|En seguimiento|Cerrado', sst_peligro: 'Abierto|En seguimiento|Cerrado', sst_inspeccion: 'Abierto|En seguimiento|Cerrado', sst_permiso: 'Abierto|Cerrado|Suspendido',
+  sst_capacitacion: 'Programada|Realizada|Cancelada', sst_trabajador: 'Activo|Retirado', sst_investigacion: 'Abierto|En seguimiento|Cerrado', sst_emergencia: 'Abierto|Cerrado', sst_equipo: 'Operativo|Fuera de servicio|Retirado', sst_actividad: 'Programada|Ejecutada|Cancelada', sst_documento: 'Cargado|Pendiente|No aplica', ambiental: 'Abierto|En seguimiento|Cerrado', amb_chequeo: 'Abierto|En seguimiento|Cerrado', amb_permiso: 'En trámite|Vigente|Vencido|Negado|Cerrado', forestal: 'Inventariado|Autorizado|Intervenido|Compensado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+// Anexos de SST y preguntas de las listas de chequeo (C cumple, NC no cumple, NA no aplica)
+const SST_ANEXOS = ['sst_peligro', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_trabajador', 'sst_epp', 'sst_seguridad_social', 'sst_investigacion', 'sst_emergencia', 'sst_equipo', 'sst_actividad', 'sst_documento'];
+const ANEXOS_SST = ['Afiliaciones', 'Exámenes médicos ocupacionales', 'Inducciones y evaluaciones', 'Entrega de EPP y dotación', 'Notificación de riesgos', 'Exámenes de retiro', 'Paz y salvos', 'Preoperacionales', 'Charlas y capacitaciones', 'Inspecciones', 'Licencia de salud ocupacional', 'Certificación de pagos (revisor fiscal)', 'Planillas de seguridad social del mes', 'Actas COPASST y COCOLA', 'Certificado ARL de accidentalidad', 'Personal administrativo', 'Matriz de peligros', 'Plan de trabajo anual SST', 'Plan de emergencias', 'Inspecciones programadas y gestión documental', 'Evidencia fotográfica', 'Aprobación del informe por la interventoría'];
+const LISTAS_SST = {
+  EPP: ['Casco con barbuquejo en buen estado', 'Gafas de seguridad', 'Protección auditiva donde hay ruido', 'Guantes según la tarea', 'Botas de seguridad', 'Chaleco reflectivo en la vía', 'Ropa de trabajo / dotación', 'Protección respiratoria donde hay polvo o vapores'],
+  Andamios: ['Apoyado sobre base firme y nivelada', 'Plataforma completa y asegurada', 'Barandas y rodapiés', 'Arriostrado o anclado a la estructura', 'Acceso seguro (escalera)', 'Tarjeta de inspección vigente', 'Trabajadores con certificado y arnés en alturas'],
+  Excavaciones: ['Talud o entibado según la profundidad y el suelo', 'Material excavado retirado del borde', 'Barreras y señalización perimetral', 'Escalera de acceso y salida', 'Inspección diaria por persona competente', 'Redes de servicios identificadas', 'Control de agua (achique)'],
+  Señalización: ['PMT aprobado e implementado', 'Señales preventivas y reglamentarias', 'Conos, canalizadores y barricadas', 'Paleteros con radio y chaleco', 'Iluminación y dispositivos luminosos de noche', 'Delimitación de la zona de trabajo'],
+  Extintores: ['Carga vigente (etiqueta)', 'Manómetro en zona verde', 'Pasador y sello', 'Ubicado, señalizado y accesible', 'Tipo adecuado al riesgo', 'Inspección mensual registrada'],
+  Botiquín: ['Contenido completo', 'Sin elementos vencidos', 'Camilla con inmovilizadores', 'Ubicado y señalizado', 'Brigadista o primer respondiente en el frente'],
+  'Herramientas y equipos': ['Herramientas en buen estado', 'Guardas y protecciones', 'Extensiones y tableros sin daños', 'Maquinaria con preoperacional diario', 'Alarma de reversa y pito'],
+  'Orden y aseo': ['Áreas de tránsito despejadas', 'Materiales apilados y estables', 'Residuos clasificados', 'Baterías sanitarias e hidratación', 'Zona de almacenamiento de combustibles'],
+};
+// Lista de chequeo de una inspección: guarda {pregunta: C|NC|NA} y el servidor calcula el % de cumplimiento
+async function dialogoChequeo(id) {
+  const r = await api('t/sst_inspeccion/' + id), preg = LISTAS_SST[r.tipo] || [], resp = JSON.parse(r.chequeo || '{}');
+  if (!preg.length) return aviso('Escoja primero el tipo de inspección');
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Lista de chequeo · ${esc(r.tipo)} · ${esc(r.fecha || '')}</h3><table class="grilla"><thead><tr><th>Ítem</th><th>C</th><th>NC</th><th>NA</th></tr></thead><tbody>
+  ${preg.map((q, i) => `<tr><td>${esc(q)}</td>${['C', 'NC', 'NA'].map(v => `<td><input type="radio" name="q${i}" value="${v}" ${resp[q] === v ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}</tbody></table>
+  <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" value="si" id="ch-ok">Guardar</button></div>`;
+  $('#dialogo').showModal();
+  $('#ch-ok').onclick = async ev => {
+    ev.preventDefault();
+    const chequeo = {};
+    preg.forEach((q, i) => { const m = f.querySelector(`[name="q${i}"]:checked`); if (m) chequeo[q] = m.value; });
+    try { await api('t/sst_inspeccion/' + id, 'PUT', { chequeo }); $('#dialogo').close(); refrescar(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+}
+// Informe SST mensual del contratista en Word
+function informeSST() {
+  const mes = prompt('Mes del informe SST (AAAA-MM)', hoyISO().slice(0, 7));
+  if (mes && /^\d{4}-\d{2}$/.test(mes)) location.href = `/api/docx/informe-sst/${E.pid}?mes=${mes}`;
+}
+const AMB_TABLAS = ['amb_ficha', 'amb_requisito', 'amb_permiso', 'rcd', 'forestal', 'agua', 'maquinaria', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion'];
 const PROGRAMAS_AMB = '1. Desarrollo y aplicación de la gestión ambiental (DAGA)|2. Actividades constructivas (PAC)|3. Gestión hídrica (PGH)|4. Biótico y servicios ecosistémicos (PBSE)|5. Manejo de instalaciones temporales, maquinaria y equipos (PMIT)|6. Desarrollo local (PDL)|7. Patrimonio (PPSI)|8. Predios y servicios (PGS)|9. Accesibilidad (PA)|10. Participación, gobernanza e inclusión (PPGI)';
 const ASPECTOS_AMB = 'Señalización y aislamiento del frente|Acopio de materiales cubierto|Manejo de RCD y sitio autorizado|Residuos sólidos y peligrosos|Derrames y almacenamiento de combustibles|Protección de cuerpos de agua|Control de material particulado (humectación)|Maquinaria en buen estado (sin fugas)|Protección de la vegetación|Baterías sanitarias|Orden y aseo|Capacitación ambiental';
 const TABLAS = {
@@ -1047,6 +1463,18 @@ const TABLAS = {
   bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['clima', 'Clima', 'select:Seco|Lluvia|Lluvia intermitente'], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['observaciones', 'Observaciones']] },
   sst: { titulo: 'SST · inspecciones, permisos y accidentes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inspección|Charla|Permiso de trabajo|Entrega de EPP|Verificación seguridad social (PILA/ARL)|Trabajo en alturas|Simulacro|Incidente|Accidente'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['personas', 'Personas', 'num'], ['dias_incapacidad', 'Días incap.', 'num'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   sst_mes: { titulo: 'SST · datos mensuales (Res. 0312 de 2019)', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajadores', 'Trabajadores', 'num'], ['accidentes', 'Accidentes', 'num'], ['accidentes_mortales', 'Mortales', 'num'], ['dias_incapacidad', 'Días incapacidad', 'num'], ['dias_cargados', 'Días cargados', 'num'], ['dias_ausencia', 'Días ausencia', 'num'], ['dias_programados', 'Días programados', 'num'], ['planillas_ok', 'PILA/ARL verificada', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
+  sst_peligro: { titulo: 'SST · matriz de peligros (GTC 45)', cols: [['proceso', 'Proceso'], ['actividad', 'Actividad'], ['rutinaria', 'Rutinaria', 'select:Sí|No'], ['peligro', 'Peligro'], ['clasificacion', 'Clasificación', 'select:Biológico|Físico|Químico|Psicosocial|Biomecánico|Condiciones de seguridad|Fenómenos naturales'], ['efectos', 'Efectos posibles'], ['controles', 'Controles existentes'], ['nd', 'ND', 'select:10|6|2|0'], ['ne', 'NE', 'select:4|3|2|1'], ['nc', 'NC', 'select:100|60|25|10'], ['np', 'NP', 'ro'], ['nr', 'NR', 'ro'], ['nivel', 'Nivel', 'ro'], ['expuestos', 'Expuestos', 'num'], ['intervencion', 'Medida de intervención'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_inspeccion: { titulo: 'SST · inspecciones con lista de chequeo', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:' + Object.keys(LISTAS_SST).join('|')], ['frente', 'Frente'], ['inspector', 'Inspector'], ['cumplimiento', '% cumple', 'ro'], ['hallazgos', 'Hallazgos'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_permiso: { titulo: 'SST · permisos de trabajo y ATS', cols: [['fecha', 'Fecha', 'date'], ['numero', 'N.º'], ['tipo', 'Tipo', 'select:Trabajo en alturas|Excavación|Trabajo en caliente|Espacio confinado|Eléctrico|Izaje de cargas'], ['frente', 'Frente'], ['actividad', 'Actividad'], ['altura', 'Altura / prof. m', 'num'], ['trabajadores', 'Trabajadores'], ['coordinador', 'Coordinador'], ['emisor', 'Emisor'], ['ats', 'ATS', 'select:Sí|No'], ['lista_chequeo', 'Lista chequeo', 'select:Sí|No'], ['rescate', 'Plan rescate', 'select:Sí|No|No aplica'], ['vigente_hasta', 'Vigente hasta', 'date'], ['estado', 'Estado', 'select']] },
+  sst_capacitacion: { titulo: 'SST · capacitaciones y charlas', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inducción|Reinducción|Charla de 5 minutos|Capacitación|Trabajo en alturas|Brigada de emergencias|Notificación de riesgos'], ['tema', 'Tema'], ['facilitador', 'Facilitador'], ['horas', 'Horas', 'num'], ['asistentes', 'Asistentes', 'num'], ['lista', 'Nombres de asistentes'], ['evaluacion', 'Evaluación'], ['estado', 'Estado', 'select']] },
+  sst_trabajador: { titulo: 'SST · trabajadores del contratista', cols: [['nombre', 'Nombre'], ['documento', 'Documento'], ['cargo', 'Cargo'], ['grupo', 'Grupo', 'select:Administrativo|Operativo|Subcontratista'], ['eps', 'EPS'], ['afp', 'AFP'], ['arl', 'ARL'], ['ccf', 'Caja'], ['riesgo', 'Riesgo ARL', 'select:I|II|III|IV|V'], ['ingreso', 'Ingreso', 'date'], ['retiro', 'Retiro', 'date'], ['examen_ingreso', 'Examen ingreso', 'date'], ['examen_periodico', 'Examen periódico', 'date'], ['examen_retiro', 'Examen retiro', 'date'], ['induccion', 'Inducción', 'date'], ['notificacion_riesgos', 'Notif. riesgos', 'date'], ['paz_salvo', 'Paz y salvo', 'select:Sí|No|No aplica'], ['alturas_vence', 'Cert. alturas hasta', 'date'], ['estado', 'Estado', 'select']] },
+  sst_epp: { titulo: 'SST · entrega de EPP y dotación', cols: [['fecha', 'Fecha', 'date'], ['trabajador', 'Trabajador'], ['elemento', 'Elemento', 'select:Casco con barbuquejo|Gafas de seguridad|Protector auditivo|Guantes|Botas de seguridad|Chaleco reflectivo|Overol / dotación|Respirador|Arnés y eslinga|Careta de soldar'], ['cantidad', 'Cant.', 'num'], ['motivo', 'Motivo', 'select:Dotación inicial|Reposición por desgaste|Pérdida|Daño'], ['reposicion', 'Reposición', 'date'], ['firma', 'Firma', 'select:Sí|No']] },
+  sst_seguridad_social: { titulo: 'SST · verificación PILA / ARL por trabajador', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajador', 'Trabajador'], ['planilla', 'Planilla PILA'], ['ibc', 'IBC', 'num'], ['eps', 'EPS', 'select:Sí|No|Pendiente'], ['afp', 'AFP', 'select:Sí|No|Pendiente'], ['arl', 'ARL', 'select:Sí|No|Pendiente'], ['ccf', 'CCF', 'select:Sí|No|Pendiente'], ['verificado', 'Verificado', 'select:Sí|No|Pendiente'], ['observacion', 'Observación']] },
+  sst_investigacion: { titulo: 'SST · investigación de incidentes y accidentes', cols: [['fecha', 'Fecha evento', 'date'], ['tipo', 'Tipo', 'select:Incidente|Accidente leve|Accidente grave|Accidente mortal'], ['trabajador', 'Trabajador'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['dias_incapacidad', 'Días incap.', 'num'], ['reporte_arl', 'Reporte ARL (FURAT)', 'date'], ['investigado', 'Investigado', 'date'], ['causas', 'Causas'], ['acciones', 'Acciones'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_emergencia: { titulo: 'SST · plan de emergencias y simulacros', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Plan de emergencias|Simulacro|Brigada|Botiquín|Camilla|Extintores|Punto de encuentro'], ['escenario', 'Escenario'], ['participantes', 'Participantes', 'num'], ['tiempo', 'Tiempo respuesta'], ['resultado', 'Resultado'], ['mejoras', 'Mejoras'], ['proxima', 'Próxima', 'date'], ['estado', 'Estado', 'select']] },
+  sst_equipo: { titulo: 'SST · maquinaria y vehículos (preoperacionales)', cols: [['equipo', 'Equipo / vehículo'], ['placa', 'Placa / serie'], ['modelo', 'Modelo'], ['operador', 'Operador'], ['licencia', 'Licencia hasta', 'date'], ['tecnomecanica', 'Técnico-mecánica hasta', 'date'], ['soat', 'SOAT hasta', 'date'], ['ultimo_preoperacional', 'Último preoperacional', 'date'], ['estado', 'Estado', 'select']] },
+  sst_actividad: { titulo: 'SST · cronograma, COPASST y COCOLA', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Cronograma SST|Reunión COPASST|Reunión COCOLA|Obligación contractual'], ['actividad', 'Actividad'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['observacion', 'Observación']] },
+  sst_documento: { titulo: 'SST · soportes del informe (anexos 1 a 22)', cols: [['mes', 'Mes (AAAA-MM)'], ['anexo', 'Anexo', 'select:' + ANEXOS_SST.map((a, i) => (i + 1) + '. ' + a).join('|')], ['descripcion', 'Descripción'], ['estado', 'Estado', 'select']] },
   ambiental: { titulo: 'Seguimiento ambiental (PAGA / PMA)', cols: [['fecha', 'Fecha', 'date'], ['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['ficha', 'Ficha'], ['actividad', 'Actividad'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['logro', 'Logro', 'num'], ['cantidad', 'Cantidad', 'num'], ['unidad', 'Und'], ['permiso', 'Permiso'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   pmt: { titulo: 'Planes de manejo de tránsito (PMT)', cols: [['frente', 'Frente'], ['abs_ini', 'Abscisa inicial'], ['abs_fin', 'Abscisa final'], ['cierre', 'Cierre', 'select:Total|Parcial|Por carril|Nocturno'], ['interferencia', 'Interferencia', 'select:Baja|Media|Alta'], ['radicado', 'Radicado aprobación'], ['aprobado', 'Aprobado', 'date'], ['desde', 'Vigente desde', 'date'], ['hasta', 'Vigente hasta', 'date'], ['dispositivos', 'Dispositivos'], ['ultima_inspeccion', 'Última inspección', 'date'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   amb_ficha: { titulo: 'Fichas del PAGA del contrato (catálogo)', cols: [['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['codigo', 'Código'], ['nombre', 'Ficha'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['unidad', 'Und'], ['periodicidad', 'Periodicidad', 'select:Diaria|Semanal|Quincenal|Mensual|Trimestral|Única'], ['responsable', 'Responsable'], ['presupuesto', 'Presupuesto', 'num'], ['ejecutado', 'Ejecutado', 'num'], ['notas', 'Avances / modificaciones']] },
@@ -1068,10 +1496,11 @@ async function vTabla(cont, tabla) {
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${def.titulo}</h2><span class="esp"></span><button class="btn prim" id="t-nuevo">+ Nueva fila</button></div>
   <div class="grilla-cont"><table class="grilla" id="g-tabla"><thead><tr>${def.cols.map(c => `<th class="${c[2] === 'num' ? 'num' : ''}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody>
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
+    if (t === 'ro') return `<td class="${typeof f[k] === 'number' ? 'num' : ''}" title="Calculado">${typeof f[k] === 'number' ? fmt(f[k], k === 'cumplimiento' ? 1 : 0) : esc(f[k] ?? '')}</td>`;
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
-    if (k === 'fecha' || k === 'plazo' || k === 'hasta' || k === 'vence' || k === 'vence_emisiones') { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
+    if (['fecha', 'plazo', 'hasta', 'vence', 'vence_emisiones', 'proximo_mtto', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
     return celda(f[k], k, t);
-  }).join('')}<td class="acciones"><button class="btn clip" data-adj="${tabla}:${f.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
+  }).join('')}<td class="acciones">${tabla === 'sst_inspeccion' ? `<button class="btn" data-chequeo="${f.id}" title="Lista de chequeo">☑</button>` : ''}<button class="btn clip" data-adj="${tabla}:${f.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
   </tbody></table></div>`;
   if (tabla === 'sst_mes') {
     const ind = await api('sst-indicadores/' + E.pid);
@@ -1086,11 +1515,12 @@ async function vTabla(cont, tabla) {
     $('#t-infamb').onclick = () => informeMensual('informe-ambiental');
     cont.insertAdjacentHTML('beforeend', '<p class="sub">Fichas según la Guía de Manejo Ambiental del INVÍAS, modo carretero (2022, Res. 2335 de 2022). Los programas 6 a 10 son sociales: regístrelos en "Gestión social" con el mismo código de ficha. Ajuste los nombres marcados "(verificar)" con el PAGA aprobado.</p>');
   }
+  if (tabla === 'poliza') { $('#t-nuevo').insertAdjacentHTML('beforebegin', '<button class="btn" id="t-poliza-ia" title="Suba el PDF o la foto de la póliza: la IA lee los amparos y usted confirma">📄 Leer póliza con IA</button> '); $('#t-poliza-ia').onclick = leerDocumentoIA; }
   if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
-  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
-  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'rcd', 'forestal', 'agua', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion'].includes(tabla) ? { fecha: hoyISO() } : tabla === 'sst_mes' ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+  g.addEventListener('click', async e => { const ch = e.target.closest('[data-chequeo]'); if (ch) return dialogoChequeo(Number(ch.dataset.chequeo)); const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
+  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'rcd', 'forestal', 'agua', 'monitoreo', 'amb_chequeo', 'pmt_inspeccion', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_epp', 'sst_investigacion', 'sst_emergencia', 'sst_actividad'].includes(tabla) ? { fecha: hoyISO() } : ['sst_mes', 'sst_seguridad_social', 'sst_documento'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
 // ---------- Panel lateral ----------
@@ -1177,12 +1607,13 @@ function pintarMensajes() {
 function pintarAsistente(c) {
   c.innerHTML = `<div class="asistente"><div id="chat" class="chat"></div><div id="chat-sug" class="chat-sug"></div>
     <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter (Mayús+Enter: nueva línea)"></textarea>
-    <div class="chat-pie"><span class="sub">✦ ${esc(E.proveedorIA || 'Gemini')} · Ctrl+J</span><button class="btn" id="chat-limpiar">Nueva conversación</button></div></div>`;
+    <div class="chat-pie"><span class="sub">✦ ${esc(E.proveedorIA || 'Gemini')} · Ctrl+J</span><span><button class="btn" id="chat-poliza" title="Suba cualquier documento u hoja (PDF, foto, Word, Excel) y la IA registra lo que dice">📄 Subir documento</button> <button class="btn" id="chat-limpiar">Nueva conversación</button></span></div></div>`;
   pintarMensajes(); pintarSugerencias();
   const txt = $('#chat-txt');
   txt.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(txt.value); } };
   $('#chat-sug').onclick = e => { const b = e.target.closest('[data-sug]'); if (b) preguntar(b.dataset.sug); };
   $('#chat-limpiar').onclick = () => { if (!E.chatOcupado) { E.chat = []; pintarMensajes(); } };
+  $('#chat-poliza').onclick = leerDocumentoIA;
   $('#chat').onclick = e => { const b = e.target.closest('[data-conf]'); if (b) confirmarAccion(Number(b.dataset.i), b.dataset.conf === '1'); };
   txt.focus();
 }
@@ -1275,6 +1706,56 @@ async function configurarAsistente() {
       $('#dialogo').close(); aviso('Asistente configurado'); abrirAsistente();
     } catch (e) { $('#ia-ayuda').textContent = 'Error: ' + e.message; }
   };
+}
+
+// ---------- Documentos leídos por la IA ----------
+// El usuario sube cualquier archivo (PDF, foto, Word, Excel, CSV); Gemini dice qué es y propone los registros.
+// El usuario revisa cada tarjeta y al guardar se crean los registros con el archivo adjunto.
+const NOMBRE_TABLA = { poliza: 'Pólizas', correspondencia: 'Correspondencia', ensayo: 'Ensayos', gasto: 'Gastos reales', otrosi: 'Otrosíes', social: 'Gestión social', item: 'Presupuesto', personal: 'Personal', vencimiento: 'Vencimientos', avance: 'Capturas de avance' };
+const OCULTOS = ['proyecto_id', 'contrato_id'];
+// Campos que se muestran aunque estén vacíos (para completarlos)
+const SIEMPRE = { avance: ['item_id', 'cantidad'] };
+function leerDocumentoIA() {
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf,image/*,.docx,.xlsx,.csv,.txt';
+  i.onchange = async () => {
+    const f = i.files[0]; if (!f) return;
+    const archivo = await prepararArchivo(f);
+    const caja = $('#dialogo-form');
+    caja.innerHTML = `<h3>✦ Leyendo el documento…</h3><p class="sub">${esc(f.name)} · La IA está identificando qué es y qué hay que registrar. Puede tardar un minuto.</p><div class="cargando"></div>`;
+    if (!$('#dialogo').open) $('#dialogo').showModal();
+    let d;
+    try { d = await api('asistente/documento/' + E.pid, 'POST', archivo); }
+    catch (e) { caja.innerHTML = `<h3>No se pudo leer el documento</h3><p>${esc(e.message)}</p><div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`; return; }
+    const ob = contrato('obra');
+    E.itemsObra = d.propuestas.some(p => p.tabla === 'avance') && ob ? [{ id: '', codigo: '', descripcion: '— elija —' }, ...(await api('presupuesto/' + ob.id)).items.filter(i => i.tipo === 1)] : [];
+    const tarjeta = (p, k) => `<div class="propuesta ${p.permitido ? '' : 'sin-permiso'}" data-k="${k}">
+      <label class="prop-cab"><input type="checkbox" data-incluir ${p.permitido ? 'checked' : 'disabled'}> <b>${esc(p.titulo)}</b> <span class="etiqueta">${esc(NOMBRE_TABLA[p.tabla] || p.tabla)}</span>${p.permitido ? '' : ' <span class="sub">(su rol no puede registrar aquí)</span>'}</label>
+      <div class="prop-campos">${Object.entries(p.datos).filter(([c, v]) => !OCULTOS.includes(c) && ((v != null && v !== '') || (SIEMPRE[p.tabla] || []).includes(c))).map(([c, v]) => c === 'item_id' ? `<label>ítem del presupuesto<select data-c="item_id" data-num="1">${E.itemsObra.map(i => `<option value="${i.id}" ${i.id === v ? 'selected' : ''}>${esc(i.codigo || '')} ${esc(i.descripcion)} (${esc(i.unidad || '')})</option>`).join('')}</select></label>` : `<label>${esc(c.replace(/_/g, ' '))}<input data-c="${esc(c)}" value="${esc(v ?? '')}"></label>`).join('')}</div></div>`;
+    caja.innerHTML = `<h3>✦ ${esc(d.resumen || 'Documento leído')}</h3>
+      ${d.observaciones ? `<p class="aviso-clave">💡 ${esc(d.observaciones)}</p>` : ''}
+      <p class="sub">Revise y corrija; desmarque lo que no quiera registrar. El archivo quedará adjunto a cada registro (salvo ítems de presupuesto).</p>
+      <div class="propuestas">${d.propuestas.map(tarjeta).join('') || '<p class="sub">No encontré nada para registrar en este documento. Puede adjuntarlo a mano con 📎.</p>'}</div>
+      <p class="sub" id="doc-msg"></p>
+      <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" id="doc-guardar" ${d.propuestas.some(p => p.permitido) ? '' : 'disabled'}>Registrar seleccionados</button></div>`;
+    $('#doc-guardar').onclick = async ev => {
+      ev.preventDefault();
+      const elegidas = [...caja.querySelectorAll('.propuesta')].filter(t => t.querySelector('[data-incluir]').checked);
+      let n = 0;
+      try {
+        for (const t of elegidas) {
+          const p = d.propuestas[t.dataset.k], datos = { ...p.datos };
+          t.querySelectorAll('[data-c]').forEach(e => { const v = e.value.trim(); datos[e.dataset.c] = v === '' ? null : e.dataset.num || typeof p.datos[e.dataset.c] === 'number' || ['cantidad', 'largo', 'ancho', 'espesor', 'piezas', 'abs_ini', 'abs_fin', 'valor', 'porcentaje'].includes(e.dataset.c) ? num(v) : v; });
+          if (p.tabla === 'avance' && !datos.item_id) throw new Error(`Elija el ítem del presupuesto en: ${p.titulo}`);
+          if (p.tabla === 'avance' && datos.cantidad == null) delete datos.cantidad;
+          $('#doc-msg').textContent = `Registrando ${++n} de ${elegidas.length}…`;
+          const r = await api('t/' + p.tabla, 'POST', datos);
+          if (p.tabla !== 'item') await api('adjunto', 'POST', { proyecto_id: E.pid, tabla: p.tabla, registro_id: r.id, categoria: 'Documento', descripcion: d.resumen || f.name, ...archivo });
+        }
+        $('#dialogo').close(); aviso(`${n} registro(s) creados desde ${f.name}`); refrescar();
+      } catch (e) { $('#doc-msg').textContent = 'Error: ' + e.message; }
+    };
+  };
+  i.click();
 }
 
 // ---------- Sincronización con la nube (Turso) ----------
