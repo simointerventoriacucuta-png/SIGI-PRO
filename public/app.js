@@ -85,14 +85,14 @@ const CINTA = {
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
   obra: ['Ejecución de obra', [
-    ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')]]],
+    ['Contratista', [['Contrato de obra', 'contrato', () => abrir('contrato:obra')], ['Presupuesto de obra', 'presupuesto', ab('obra', 'presupuesto')], ['Otrosíes', 'datos', ab('obra', 'otrosis')], ['Suspensiones', 'vencimiento', ab('obra', 'suspensiones')], ['Liquidación', 'balance', ab('obra', 'liquidacion')]]],
     EDITAR_PRES,
     ['Actas parciales', [['Nueva acta', 'acta', () => nuevaActa('obra')], ['Aprobar lo presentado', 'aprobar', aprobarTodo, enActa], ['Exportar acta', 'exportar', exportarActa, enActa]]],
     ['Registros', [['Bitácora', 'bitacora', () => abrir('tabla:bitacora')], ['Ensayos', 'ensayo', () => abrir('tabla:ensayo')]]],
     ['Análisis', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores', 'mayores', ab('obra', 'mayores')]]],
   ]],
   interventoria: ['Contrato de interventoría', [
-    ['Contrato propio', [['Contrato de interventoría', 'contrato', () => abrir('contrato:interventoria')], ['Presupuesto de interventoría', 'presupuesto', ab('interventoria', 'presupuesto')], ['Otrosíes', 'datos', ab('interventoria', 'otrosis')]]],
+    ['Contrato propio', [['Contrato de interventoría', 'contrato', () => abrir('contrato:interventoria')], ['Presupuesto de interventoría', 'presupuesto', ab('interventoria', 'presupuesto')], ['Otrosíes', 'datos', ab('interventoria', 'otrosis')], ['Suspensiones', 'vencimiento', ab('interventoria', 'suspensiones')], ['Liquidación', 'balance', ab('interventoria', 'liquidacion')]]],
     EDITAR_PRES,
     ['Facturación', [['Nueva cuenta de cobro', 'acta', () => nuevaActa('interventoria')], ['Balance de facturación', 'balance', ab('interventoria', 'balance')]]],
     ['Costos reales', [['Registrar gastos', 'gasto', ab('interventoria', 'gastos')], ['Control de costos', 'costos', ab('interventoria', 'costos')]]],
@@ -126,14 +126,14 @@ function pintarArbol() {
   let h = n('tablero', '📊 Tablero') + n('tabla:vencimiento', '⏰ Vencimientos', 0, r.vencimientos.length) + n('tabla:correspondencia', '✉️ Correspondencia', 0, r.conteos.correspondencia);
   h += `<div class="seccion obra">EJECUCIÓN DE OBRA · contratista</div>`;
   if (ob) {
-    h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length);
+    h += n('contrato:obra', '📄 Contrato de obra', 0, ob.numero || '') + n('presupuesto:' + ob.id, '📗 Presupuesto', 0, ob.items + ' ítems') + n('otrosis:' + ob.id, '📝 Otrosíes', 0, ob.otrosis.length) + n('suspensiones:' + ob.id, '⏸️ Suspensiones', 0, ob.suspendido ? 'suspendido' : ob.suspensiones.length) + n('liquidacion:' + ob.id, '🏁 Liquidación', 0, ob.liquidacion?.estado || '');
     h += n('', '📁 Actas parciales', 0, ob.actas.length, true) + ob.actas.map(a => n('acta:' + a.id, `Acta ${a.numero}`, 1, a.estado)).join('');
     h += n('tabla:bitacora', '📓 Bitácora', 0, r.conteos.bitacora) + n('tabla:ensayo', '🧪 Ensayos', 0, r.conteos.ensayo);
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0);
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
   if (it) {
-    h += n('contrato:interventoria', '📄 Contrato de interventoría', 0, it.numero || '') + n('presupuesto:' + it.id, '📗 Presupuesto', 0, it.items + ' ítems') + n('otrosis:' + it.id, '📝 Otrosíes', 0, it.otrosis.length);
+    h += n('contrato:interventoria', '📄 Contrato de interventoría', 0, it.numero || '') + n('presupuesto:' + it.id, '📗 Presupuesto', 0, it.items + ' ítems') + n('otrosis:' + it.id, '📝 Otrosíes', 0, it.otrosis.length) + n('suspensiones:' + it.id, '⏸️ Suspensiones', 0, it.suspendido ? 'suspendido' : it.suspensiones.length) + n('liquidacion:' + it.id, '🏁 Liquidación', 0, it.liquidacion?.estado || '');
     h += n('', '📁 Cuentas de cobro', 0, it.actas.length, true) + it.actas.map(a => n('acta:' + a.id, `Cuenta ${a.numero}`, 1, a.estado)).join('');
     h += n('gastos:' + it.id, '💵 Gastos reales', 0) + n('costos:' + it.id, '🎯 Control de costos', 0);
     h += n('tabla:personal', '👷 Personal', 0, r.conteos.personal) + n('tabla:poliza', '🛡️ Pólizas', 0, r.conteos.poliza);
@@ -151,7 +151,8 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'),
+    suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
 function cintaDe(k) {
@@ -185,7 +186,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
     await vista(cont, x);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
 }
@@ -392,6 +393,51 @@ async function vOtrosis(cont, cid) {
   editable(g, (td, v) => api('t/otrosi/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
   g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este otrosí?')) { try { await api('t/otrosi/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
   $('#o-nuevo').onclick = async () => { try { await api('t/otrosi', 'POST', { contrato_id: c.id, fecha: hoyISO(), estado: 'En trámite' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+}
+
+// ---------- Suspensiones y reinicios ----------
+async function vSuspensiones(cont, cid) {
+  const c = E.res.contratos.find(x => String(x.id) === cid);
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Suspensiones y reinicios · contrato ${esc(c.numero || '')}</h2><span class="esp"></span><button class="btn prim" id="s-nueva">+ Nueva suspensión</button></div>
+  <div class="tarjetas">
+    <div class="tarjeta"><div class="et">Estado</div><div class="va">${c.suspendido ? 'Suspendido' : 'En ejecución'}</div></div>
+    <div class="tarjeta"><div class="et">Días suspendidos</div><div class="va">${c.dias_suspendidos}</div><div class="no">Corren la fecha de terminación</div></div>
+    <div class="tarjeta"><div class="et">Terminación vigente</div><div class="va">${fechaLarga(c.fecha_fin_vigente) || '—'}</div><div class="no">Original ${fechaLarga(c.fecha_fin) || '—'} + ${c.prorroga_dias} d de prórroga + ${c.dias_suspendidos} d suspendidos</div></div>
+  </div>
+  <div class="grilla-cont"><table class="grilla" id="g-susp"><thead><tr><th>N.º</th><th>Fecha suspensión</th><th>Fecha reinicio</th><th class="num">Días</th><th>Motivo</th><th>Acta</th><th>Estado</th><th>¿Pólizas ajustadas?</th><th></th></tr></thead><tbody>
+  ${c.suspensiones.map(x => `<tr data-id="${x.id}"><td>${x.numero}</td>${celda(x.fecha_suspension, 'fecha_suspension', 'date')}${celda(x.fecha_reinicio, 'fecha_reinicio', 'date')}<td class="num">${diasSusp(x)}</td>${celda(x.motivo, 'motivo')}${celda(x.acta, 'acta')}${celda(x.estado, 'estado', 'select', 'data-op="Suspendido|Reiniciado"')}${celda(x.polizas_ajustadas, 'polizas_ajustadas', 'select', 'data-op="No|Sí"')}<td><button class="btn" data-borrar="${x.id}" title="Eliminar">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="sub">Sin suspensiones</td></tr>'}
+  </tbody></table></div>
+  <p class="sub">Mientras siga suspendido, los días se cuentan hasta hoy. Al reiniciar hay que ajustar las pólizas; la campana lo recuerda, y también si la suspensión pasa de 30 días.</p>`;
+  const g = $('#g-susp');
+  editable(g, (td, v) => api('t/suspension/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar esta suspensión?')) { try { await api('t/suspension/' + b.dataset.borrar, 'DELETE'); refrescar(); } catch (er) { aviso('Error: ' + er.message); } } });
+  $('#s-nueva').onclick = async () => { try { await api('t/suspension', 'POST', { contrato_id: c.id, fecha_suspension: hoyISO(), estado: 'Suspendido' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+}
+const diasSusp = x => { const fin = x.estado === 'Reiniciado' && x.fecha_reinicio ? x.fecha_reinicio : hoyISO(); return x.fecha_suspension ? Math.max(0, Math.round((new Date(fin) - new Date(x.fecha_suspension)) / 86400000)) : 0; };
+
+// ---------- Liquidación del contrato ----------
+async function vLiquidacion(cont, cid) {
+  const c = E.res.contratos.find(x => String(x.id) === cid);
+  const l = c.liquidacion || {}, pl = c.plazos_liquidacion || {};
+  const tarj = (et, va, no = '') => `<div class="tarjeta"><div class="et">${et}</div><div class="va">${va}</div>${no ? `<div class="no">${no}</div>` : ''}</div>`;
+  const fila = (et, campo, tipo = 'text', extra = '') => `<tr><th>${et}</th>${celda(l[campo], campo, tipo, extra)}</tr>`;
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Liquidación · contrato ${esc(c.numero || '')}</h2></div>
+  <div class="tarjetas">${tarj('Valor vigente', pesos(c.valor_vigente))}${tarj('Ejecutado acumulado', pesos(c.ejecutado), c.actas.length ? 'Hasta la ' + (c.tipo === 'obra' ? 'acta ' : 'cuenta ') + c.actas[c.actas.length - 1].numero : 'Sin actas')}${tarj('Saldo por ejecutar', pesos(c.valor_vigente - c.ejecutado))}</div>
+  <h3>Plazos legales (Ley 1150 de 2007, art. 11)</h3>
+  <div class="tarjetas">${tarj('Terminación vigente', fechaLarga(c.fecha_fin_vigente) || '—')}${tarj('Bilateral', fechaLarga(pl.bilateral) || '—', '4 meses desde la terminación')}${tarj('Unilateral', fechaLarga(pl.unilateral) || '—', '2 meses más')}${tarj('Judicial', fechaLarga(pl.judicial) || '—', '2 años más')}</div>
+  <h3>Ficha de liquidación</h3>
+  <div class="grilla-cont"><table class="grilla" id="g-liq"><tbody>
+  ${fila('Tipo', 'tipo', 'select', 'data-op="Bilateral|Unilateral|Judicial"')}${fila('Fecha de recibo final', 'fecha_recibo_final', 'date')}${fila('Fecha de liquidación', 'fecha_liquidacion', 'date')}
+  ${fila('Valor ejecutado', 'valor_ejecutado', 'num')}${fila('Saldo a favor del contratista', 'saldo_a_favor_contratista', 'num')}${fila('Saldo a favor de la entidad', 'saldo_a_favor_entidad', 'num')}
+  ${fila('Devolución de retenciones', 'devolucion_retenciones', 'num')}${fila('Paz y salvos', 'paz_y_salvos')}${fila('Observaciones', 'observaciones')}${fila('Estado', 'estado', 'select', 'data-op="En trámite|Firmada|Cerrada"')}
+  </tbody></table></div>
+  <p class="sub">La campana avisa 30 días antes de cada vencimiento mientras la liquidación no esté firmada.</p>`;
+  editable($('#g-liq'), async (td, v) => {
+    const d = { [td.dataset.c]: v };
+    if (c.liquidacion) return api('t/liquidacion/' + c.liquidacion.id, 'PUT', d);
+    c.liquidacion = await api('t/liquidacion', 'POST', { contrato_id: c.id, valor_ejecutado: c.ejecutado, ...d });
+    return c.liquidacion;
+  });
 }
 
 // ---------- Usuarios y auditoría ----------

@@ -205,3 +205,30 @@ CREATE TABLE IF NOT EXISTS otrosi (
   estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
   polizas_ajustadas TEXT DEFAULT 'No'
 );
+
+CREATE TABLE IF NOT EXISTS suspension (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER,
+  fecha_suspension TEXT,
+  fecha_reinicio TEXT,              -- vacía mientras siga suspendido
+  motivo TEXT,
+  acta TEXT,                        -- número o referencia del acta de suspensión
+  estado TEXT DEFAULT 'Suspendido', -- Suspendido, Reiniciado
+  polizas_ajustadas TEXT DEFAULT 'No'
+);
+
+CREATE TABLE IF NOT EXISTS liquidacion (
+  id INTEGER PRIMARY KEY,
+  contrato_id INTEGER NOT NULL UNIQUE REFERENCES contrato(id) ON DELETE CASCADE,
+  tipo TEXT DEFAULT 'Bilateral',    -- Bilateral, Unilateral, Judicial
+  fecha_recibo_final TEXT,
+  fecha_liquidacion TEXT,
+  valor_ejecutado REAL DEFAULT 0,
+  saldo_a_favor_contratista REAL DEFAULT 0,
+  saldo_a_favor_entidad REAL DEFAULT 0,
+  devolucion_retenciones REAL DEFAULT 0,
+  paz_y_salvos TEXT,
+  observaciones TEXT,
+  estado TEXT DEFAULT 'En trámite'  -- En trámite, Firmada, Cerrada
+);
