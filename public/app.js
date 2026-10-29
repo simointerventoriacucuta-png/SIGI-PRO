@@ -80,7 +80,7 @@ const CINTA = {
   inicio: ['Inicio', [
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
     ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
-    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente (Claude)', 'memoria', () => mostrarLateral('asistente')], ['Clave del asistente', 'nube', configurarAsistente]]],
+    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente', 'memoria', () => mostrarLateral('asistente')], ['Configurar asistente', 'nube', configurarAsistente]]],
     ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
@@ -591,7 +591,7 @@ async function pintarLateral() {
   if (E.buscar) buscar();
 }
 
-// ---------- Asistente (Claude) ----------
+// ---------- Asistente (Claude u Ollama) ----------
 E.chat = [];
 function pintarAsistente(c) {
   const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
@@ -610,9 +610,51 @@ function pintarAsistente(c) {
 }
 async function configurarAsistente() {
   const s = await api('asistente/config');
-  const clave = prompt((s.configurado ? 'El asistente ya tiene clave. ' : '') + 'Pegue la clave de la API de Claude (console.anthropic.com). Se guarda solo en este equipo:');
-  if (!clave) return;
-  try { await api('asistente/config', 'POST', { clave }); aviso('Clave del asistente guardada'); } catch (e) { aviso('Error: ' + e.message); }
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Asistente</h3>
+  <p class="sub">Elija con qué modelo responde el asistente. La configuración se guarda solo en este computador.</p>
+  <div class="formulario" style="grid-template-columns:110px 1fr">
+    <label>Proveedor</label><select id="as-prov">
+      <option value="claude" ${s.proveedor !== 'ollama' ? 'selected' : ''}>Claude (en la nube, con clave de API)</option>
+      <option value="ollama" ${s.proveedor === 'ollama' ? 'selected' : ''}>Ollama (local, sin internet ni clave)</option></select>
+  </div>
+  <div class="formulario" id="as-claude" style="grid-template-columns:110px 1fr">
+    <label>Clave</label><input id="as-clave" type="password" placeholder="${s.tieneClave ? 'Ya hay una clave guardada (déjelo vacío para conservarla)' : 'sk-ant-… (console.anthropic.com)'}">
+  </div>
+  <div class="formulario" id="as-ollama" style="grid-template-columns:110px 1fr">
+    <label>Servidor</label><input id="as-url" value="${esc(s.ollama_url || 'http://127.0.0.1:11434')}">
+    <label>Modelo</label><div style="display:flex;gap:6px"><select id="as-modelo" style="flex:1">${s.ollama_modelo ? `<option selected>${esc(s.ollama_modelo)}</option>` : '<option value="">— pulse Buscar modelos —</option>'}</select><button class="btn" id="as-buscar">Buscar modelos</button></div>
+  </div>
+  <p class="sub" id="as-msg"></p>
+  <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" id="as-guardar">Guardar</button></div>`;
+  $('#dialogo').showModal();
+  const msg = t => ($('#as-msg').innerHTML = t);
+  const ver = () => {
+    const ol = $('#as-prov').value === 'ollama';
+    $('#as-ollama').style.display = ol ? '' : 'none'; $('#as-claude').style.display = ol ? 'none' : '';
+    msg(ol ? 'Instale Ollama (ollama.com), descargue un modelo (por ejemplo <b>ollama pull qwen3:8b</b>) y pulse Buscar modelos. Los datos del proyecto no salen del computador.' : '');
+  };
+  $('#as-prov').onchange = ver; ver();
+  $('#as-buscar').onclick = async ev => {
+    ev.preventDefault(); msg('Buscando modelos…');
+    try {
+      const { modelos } = await api('asistente/modelos', 'POST', { ollama_url: $('#as-url').value.trim() });
+      const actual = $('#as-modelo').value;
+      $('#as-modelo').innerHTML = modelos.map(m => `<option ${m === actual ? 'selected' : ''}>${esc(m)}</option>`).join('') || '<option value="">(ninguno)</option>';
+      msg(modelos.length ? `✅ ${modelos.length} modelo(s) encontrados.` : '⚠️ Ollama responde pero no tiene modelos. En una terminal: <b>ollama pull qwen3:8b</b>');
+    } catch (e) { msg('❌ ' + esc(e.message)); }
+  };
+  $('#as-guardar').onclick = async ev => {
+    ev.preventDefault();
+    const proveedor = $('#as-prov').value;
+    const datos = proveedor === 'ollama'
+      ? { proveedor, ollama_url: $('#as-url').value.trim(), ollama_modelo: $('#as-modelo').value }
+      : { proveedor, clave: $('#as-clave').value.trim() };
+    if (proveedor === 'ollama' && !datos.ollama_modelo) return msg('⚠️ Elija un modelo (pulse Buscar modelos).');
+    if (proveedor === 'claude' && !datos.clave && !s.tieneClave) return msg('⚠️ Pegue la clave de la API de Claude.');
+    try { await api('asistente/config', 'POST', datos); $('#dialogo').close(); aviso(proveedor === 'ollama' ? `Asistente: Ollama · ${datos.ollama_modelo}` : 'Asistente: Claude'); }
+    catch (e) { msg('❌ ' + esc(e.message)); }
+  };
 }
 
 // ---------- Sincronización con la nube (Turso) ----------
