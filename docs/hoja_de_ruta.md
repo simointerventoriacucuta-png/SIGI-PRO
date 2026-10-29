@@ -40,7 +40,7 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
    - Plantillas de Excel o Word con campos de la base.
    - Valores en letras en pesos.
    - Explorador de reportes.
-9. **Listas de chequeo documental** (M4) para el acta de inicio, cada acta de pago y la liquidación, con adjunto y estado por requisito.
+9. ✅ **Listas de chequeo documental** (hecho para cada acta de pago; faltan las del acta de inicio y la liquidación) (M4) para el acta de inicio, cada acta de pago y la liquidación, con adjunto y estado por requisito.
 10. **Comparativo de precios no previstos** (M3 y M4): APU frente a referencias, con mínimo, máximo y promedio.
 11. ✅ **Suspensiones y reinicios** con recálculo del plazo; **liquidación** con balance final y devolución de retenciones.
 12. Aportes de M1:
@@ -54,7 +54,8 @@ Las notas completas de cada manual están en la carpeta temporal de la sesión, 
     - Exportar e importar con Excel (.xlsx), Word (actas e informes desde plantillas) y Microsoft Project (programa de obra y avance).
     - Autodesk (AutoCAD, Civil 3D, InfraWorks, Revit): leer alineamientos y abscisas para seguir el avance sobre el plano, por tramo e ítem.
     - Tableros tipo Power BI: publicar los datos (actas, avance, costos) para gráficos, y el asistente con Claude para analizarlos.
-14. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
+14. ✅ **Requisiciones (RQ)** de la interventoría con aprobación del director, adjuntos, Excel/Word y gasto automático al atenderlas (ver `docs/comparativo.md`).
+15. Vistas con filtro, búsqueda resaltada y agrupación (M3) y exportación a Excel de cualquier vista.
 
 ## Lo que no se copia de OPUS
 

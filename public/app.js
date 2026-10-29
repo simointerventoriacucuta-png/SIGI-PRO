@@ -103,6 +103,7 @@ const CINTA = {
     ['Facturación', [['Nueva cuenta de cobro', 'acta', () => nuevaActa('interventoria')], ['Balance de facturación', 'balance', ab('interventoria', 'balance')]]],
     DOC_ACTA,
     ['Costos reales', [['Registrar gastos', 'gasto', ab('interventoria', 'gastos')], ['Control de costos', 'costos', ab('interventoria', 'costos')]]],
+    ['Requisiciones', [['Nueva RQ', 'nuevo', () => nuevaRQ()], ['Requisiciones (RQ)', 'datos', () => abrir('requisiciones')]]],
     ['Recursos', [['Personal', 'personal', () => abrir('tabla:personal')], ['Pólizas', 'poliza', () => abrir('tabla:poliza')]]],
   ]],
   control: ['Control de obra', [
@@ -181,7 +182,7 @@ function pintarArbol() {
     h += n('', '📁 Cuentas de cobro', 0, it.actas.length, true) + it.actas.map(a => n('acta:' + a.id, `Cuenta ${a.numero}`, 1, a.estado)).join('');
     h += n('gastos:' + it.id, '💵 Gastos reales', 0) + n('costos:' + it.id, '🎯 Control de costos', 0);
     h += n('tabla:personal', '👷 Personal', 0, r.conteos.personal) + n('tabla:poliza', '🛡️ Pólizas', 0, r.conteos.poliza);
-    h += n('balance:' + it.id, '📈 Balance de facturación', 0);
+    h += n('balance:' + it.id, '📈 Balance de facturación', 0) + n('requisiciones', '🧾 Requisiciones (RQ)', 0, r.rq_pendientes || '');
   }
   $('#arbol').innerHTML = h;
 }
@@ -195,7 +196,7 @@ function tituloDoc(k) {
   return { tablero: 'Tablero', proyecto: 'Datos del proyecto', contrato: 'Contrato de ' + (x === 'obra' ? 'obra' : 'interventoría'),
     presupuesto: 'Presupuesto ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), acta: a ? (a.tipo === 'obra' ? 'Acta ' : 'Cuenta ') + a.numero : 'Acta',
     tabla: TABLAS[x]?.titulo || x, balance: 'Balance ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), mayores: 'Mayores y menores',
-    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance',
+    gastos: 'Gastos reales', costos: 'Control de costos', usuarios: 'Usuarios', auditoria: 'Auditoría', otrosis: 'Otrosíes ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), programa: 'Programa de obra', plano: 'Avance en el plano', graficos: 'Gráficos y Power BI', fotos: 'Registro fotográfico', avances: 'Capturas de avance', requisiciones: 'Requisiciones (RQ)', rq: 'RQ ' + (E.rqNum?.[x] ?? ''),
     suspensiones: 'Suspensiones ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría'), liquidacion: 'Liquidación ' + (c?.tipo === 'obra' ? 'obra' : 'interventoría') }[t] || k;
 }
 // Pestaña de la cinta que corresponde a cada documento
@@ -205,6 +206,7 @@ function cintaDe(k) {
   if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'control'])), ambiental: 'control', pmt: 'control', social: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
+  if (t === 'requisiciones' || t === 'rq') return 'interventoria';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
   return E.res?.contratos.find(c => String(c.id) === x)?.tipo;
 }
@@ -235,7 +237,7 @@ async function pintarDocs() {
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
   try {
-    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion }[t];
+    const vista = { tablero: vTablero, proyecto: vProyecto, contrato: vContrato, presupuesto: vPresupuesto, acta: vActa, tabla: vTabla, balance: vBalance, mayores: vMayores, gastos: vGastos, costos: vCostos, usuarios: vUsuarios, auditoria: vAuditoria, otrosis: vOtrosis, programa: vPrograma, plano: vPlano, graficos: vGraficos, fotos: vFotos, avances: vAvances, suspensiones: vSuspensiones, liquidacion: vLiquidacion, requisiciones: vRequisiciones, rq: vRQ }[t];
     await vista(cont, x);
     marcarAdjuntos(cont);
   } catch (e) { cont.innerHTML = `<div class="vacio">Error: ${esc(e.message)}</div>`; }
@@ -427,12 +429,36 @@ async function vActa(cont, id) {
       <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
       <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
   </tbody></table></div>
-  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>`;
+  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
+  <h3 style="font-size:13px;margin:16px 0 4px">Lista de chequeo documental <span class="sub" id="chequeo-res"></span></h3>
+  <div id="chequeo-acta"></div>`;
+  pintarChequeo(id, bloq);
   editable($('#g-acta'), (td, v) => api(`acta/${id}/item/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   editable($('#g-acta-cab'), (td, v) => api('t/acta/' + id, 'PUT', { [td.dataset.c]: v }));
   $('#pasos-acta').onclick = async e => {
     const b = e.target.closest('.paso'); if (!b || b.disabled || !confirm(`¿Pasar el acta ${a.numero} a "${b.dataset.e}"?`)) return;
     try { await api('t/acta/' + id, 'PUT', { estado: b.dataset.e }); aviso('Estado: ' + b.dataset.e); await refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+  };
+}
+// Lista de chequeo documental: sin todos los obligatorios en "Cumple" o "No aplica" no se aprueba el acta
+async function pintarChequeo(id, bloq, ch) {
+  ch = ch || await api(`acta/${id}/chequeo`);
+  const cont = $('#chequeo-acta'); if (!cont) return;
+  $('#chequeo-res').textContent = ch.completo ? '· completa: se puede aprobar' : `· faltan ${ch.faltan} obligatorios para aprobar`;
+  const color = { Cumple: '#1b7a3a', 'No cumple': '#b3261e', 'No aplica': '#666', Pendiente: '#b26a00' };
+  cont.innerHTML = `<div class="grilla-cont"><table class="grilla" id="g-chequeo"><thead><tr><th>#</th><th>Requisito</th><th>Oblig.</th><th>Estado</th><th>Radicado / folio / enlace SECOP II</th><th>Observación</th>${bloq ? '' : '<th></th>'}</tr></thead><tbody>
+  ${ch.filas.map((f, k) => `<tr data-r="${f.id}"><td>${k + 1}</td><td>${esc(f.requisito)}</td><td>${f.obligatorio ? 'Sí' : 'No'}</td>
+    <td>${bloq ? `<span style="color:${color[f.estado]}">${esc(f.estado)}</span>` : `<select data-c="estado" style="color:${color[f.estado]}">${ch.estados.map(e => `<option ${e === f.estado ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>`}</td>
+    <td>${bloq ? esc(f.referencia ?? '') : `<input data-c="referencia" value="${esc(f.referencia ?? '')}">`}</td>
+    <td>${bloq ? esc(f.observacion ?? '') : `<input data-c="observacion" value="${esc(f.observacion ?? '')}">`}</td>
+    ${bloq ? '' : '<td><button type="button" data-borrar title="Quitar requisito">✕</button></td>'}</tr>`).join('')}
+  </tbody></table></div>${bloq ? '' : '<button type="button" id="chequeo-nuevo" style="margin-top:6px">+ Requisito</button>'}`;
+  if (bloq) return;
+  const guardar = async (rid, metodo, cuerpo) => { try { pintarChequeo(id, bloq, await api(`acta/${id}/chequeo/${rid}`, metodo, cuerpo)); } catch (er) { aviso('Error: ' + er.message); } };
+  cont.onchange = e => { const c = e.target.dataset.c; if (c) guardar(e.target.closest('tr').dataset.r, 'PUT', { [c]: e.target.value }); };
+  cont.onclick = e => {
+    if (e.target.closest('[data-borrar]') && confirm('¿Quitar este requisito?')) guardar(e.target.closest('tr').dataset.r, 'DELETE');
+    if (e.target.id === 'chequeo-nuevo') { const r = prompt('Nuevo requisito:'); if (r) api(`acta/${id}/chequeo`, 'POST', { requisito: r }).then(x => pintarChequeo(id, bloq, x)).catch(er => aviso('Error: ' + er.message)); }
   };
 }
 async function nuevaActa(tipo) {
@@ -684,6 +710,79 @@ async function vSuspensiones(cont, cid) {
   $('#s-nueva').onclick = async () => { try { await api('t/suspension', 'POST', { contrato_id: c.id, fecha_suspension: hoyISO(), estado: 'Suspendido' }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 const diasSusp = x => { const fin = x.estado === 'Reiniciado' && x.fecha_reinicio ? x.fecha_reinicio : hoyISO(); return x.fecha_suspension ? Math.max(0, Math.round((new Date(fin) - new Date(x.fecha_suspension)) / 86400000)) : 0; };
+
+// ---------- Requisiciones (RQ) ----------
+// Flujo: Borrador → Solicitada → Aprobada / Rechazada → Atendida. Aprueba o rechaza el director; al atender una RQ del contrato de interventoría se registra el gasto.
+const COLOR_RQ = { Borrador: '#666', Solicitada: '#b26a00', Aprobada: '#1f5fa8', Rechazada: '#b3261e', Atendida: '#1b7a3a' };
+const tipoContrato = id => { const c = E.res?.contratos.find(c => c.id === id); return c ? (c.tipo === 'obra' ? 'Obra' : 'Interventoría') : '—'; };
+async function nuevaRQ() {
+  const it = contrato('interventoria') || contrato('obra');
+  try { const r = await api('t/requisicion', 'POST', { proyecto_id: E.pid, contrato_id: it?.id || null, fecha: hoyISO(), estado: 'Borrador' }); (E.rqNum = E.rqNum || {})[r.id] = r.numero; abrir('rq:' + r.id); aviso('RQ ' + r.numero + ' creada'); }
+  catch (e) { aviso('Error: ' + e.message); }
+}
+async function vRequisiciones(cont) {
+  const lista = await api('t/requisicion?proyecto_id=' + E.pid);
+  E.rqNum = Object.fromEntries(lista.map(r => [r.id, r.numero]));
+  const cuenta = e => lista.filter(r => r.estado === e).length;
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Requisiciones (RQ)</h2><span class="esp"></span><button class="btn prim" id="rq-nueva">+ Nueva RQ</button></div>
+  <div class="tarjetas">${['Borrador', 'Solicitada', 'Aprobada', 'Rechazada', 'Atendida'].map(e => `<div class="tarjeta"><div class="et">${e}</div><div class="va" style="color:${COLOR_RQ[e]}">${cuenta(e)}</div></div>`).join('')}</div>
+  <div class="grilla-cont"><table class="grilla" id="g-rq"><thead><tr><th>N.º</th><th>Fecha</th><th>Contrato</th><th>Solicitante</th><th>Frente</th><th>Justificación</th><th>Estado</th><th></th></tr></thead><tbody>
+  ${lista.map(r => `<tr data-rq="${r.id}" style="cursor:pointer"><td>${r.numero}</td><td>${esc(r.fecha || '')}</td><td>${tipoContrato(r.contrato_id)}</td><td>${esc(r.solicitante || '')}</td><td>${esc(r.frente || '')}</td><td>${esc(r.justificacion || '')}</td><td style="color:${COLOR_RQ[r.estado]};font-weight:600">${esc(r.estado)}</td><td class="acciones"><button class="btn clip" data-adj="requisicion:${r.id}" title="Adjuntos">📎</button></td></tr>`).join('') || '<tr><td colspan="8" class="sub">Sin requisiciones</td></tr>'}
+  </tbody></table></div>
+  <p class="sub">El director aprueba o rechaza las RQ solicitadas; la campana avisa las pendientes. Al atender una RQ del contrato de interventoría se crea el gasto en "Gastos reales".</p>`;
+  $('#rq-nueva').onclick = nuevaRQ;
+  $('#g-rq').onclick = e => { const tr = e.target.closest('[data-rq]'); if (tr && !e.target.closest('[data-adj]')) abrir('rq:' + tr.dataset.rq); };
+}
+async function vRQ(cont, id) {
+  const d = await api('requisicion/' + id), r = d.requisicion;
+  (E.rqNum = E.rqNum || {})[r.id] = r.numero;
+  const abierta = ['Borrador', 'Solicitada'].includes(r.estado);
+  const ro = (v, c, tipo = 'text') => `<td class="${tipo === 'num' ? 'num' : ''}">${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
+  const celda = abierta ? window.celda : ro;
+  const c = E.res.contratos.find(x => x.id === r.contrato_id) || null;
+  const pres = c ? (await api('presupuesto/' + c.id)).items.filter(x => x.tipo === 1) : [];
+  const PASOS = { Borrador: ['Solicitada'], Solicitada: ['Aprobada', 'Rechazada', 'Borrador'], Aprobada: ['Atendida', 'Solicitada'], Rechazada: ['Borrador'], Atendida: ['Aprobada'] }[r.estado] || [];
+  const etiqueta = { Solicitada: r.estado === 'Borrador' ? 'Solicitar' : 'Devolver a solicitada', Aprobada: r.estado === 'Atendida' ? 'Reabrir (quitar atención)' : 'Aprobar', Rechazada: 'Rechazar', Borrador: 'Devolver a borrador', Atendida: 'Marcar atendida' };
+  cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">Requisición N.º ${r.numero}</h2> <b style="margin-left:10px;color:${COLOR_RQ[r.estado]}">${esc(r.estado)}</b><span class="esp"></span>
+    <button class="btn clip" data-adj="requisicion:${r.id}">📎 Adjuntos</button><button class="btn" id="rq-xlsx">Excel</button><button class="btn" id="rq-docx">Word</button></div>
+  <table class="grilla" id="g-rq-cab" style="max-width:900px;margin-bottom:10px"><tbody>
+    <tr><th>Fecha</th>${celda(r.fecha, 'fecha', 'date')}<th>Contrato</th>${abierta ? `<td><select id="rq-contrato">${E.res.contratos.map(x => `<option value="${x.id}" ${x.id === r.contrato_id ? 'selected' : ''}>${x.tipo === 'obra' ? 'Obra' : 'Interventoría'} ${esc(x.numero || '')}</option>`).join('')}</select></td>` : `<td>${tipoContrato(r.contrato_id)}</td>`}</tr>
+    <tr><th>Solicitante</th>${celda(r.solicitante, 'solicitante')}<th>Frente</th>${celda(r.frente, 'frente')}</tr>
+    <tr><th>Justificación</th>${celda(r.justificacion, 'justificacion').replace('<td', '<td colspan="3"')}</tr>
+    ${r.aprobado_por ? `<tr><th>Aprobada por</th><td colspan="3">${esc(r.aprobado_por)} · ${esc(r.fecha_aprobacion || '')}</td></tr>` : ''}
+    ${r.estado === 'Rechazada' ? `<tr><th>Motivo del rechazo</th><td colspan="3">${esc(r.motivo_rechazo || '')}</td></tr>` : ''}
+    ${['Aprobada', 'Atendida'].includes(r.estado) ? `<tr><th>Proveedor</th>${window.celda(r.proveedor, 'proveedor')}<th>Factura / orden</th>${window.celda(r.documento, 'documento')}</tr>` : ''}
+    ${r.estado === 'Atendida' ? `<tr><th>Atendida</th><td colspan="3">${esc(r.fecha_atencion || '')}${r.gasto_id ? ' · gasto registrado en el contrato de interventoría' : ''}</td></tr>` : ''}
+  </tbody></table>
+  <div class="barra-herr" id="rq-pasos">${PASOS.map(e => `<button class="btn ${e === 'Aprobada' || (e === 'Solicitada' && r.estado === 'Borrador') ? 'prim' : ''}" data-e="${e}">${etiqueta[e]}</button>`).join('')}</div>
+  <div class="grilla-cont"><table class="grilla" id="g-rq-items"><thead><tr><th>Ítem del presupuesto</th><th>Descripción</th><th>Und</th><th class="num">Cantidad</th><th class="num">Vr. unitario estimado</th><th class="num">Vr. total</th>${abierta ? '<th></th>' : ''}</tr></thead><tbody>
+  ${d.items.map(x => `<tr data-id="${x.id}"><td>${abierta ? `<select data-item><option value="">—</option>${pres.map(p => `<option value="${p.id}" ${p.id === x.item_id ? 'selected' : ''}>${esc(((p.codigo || '') + ' ' + p.descripcion).slice(0, 60))}</option>`).join('')}</select>` : esc(x.item_codigo || '')}</td>
+    ${celda(x.descripcion, 'descripcion')}${celda(x.unidad, 'unidad')}${celda(x.cantidad, 'cantidad', 'num')}${celda(x.vr_unitario, 'vr_unitario', 'num')}<td class="num">${pesos(x.total)}</td>${abierta ? `<td><button class="btn" data-borrar="${x.id}">✕</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="7" class="sub">Sin ítems</td></tr>'}
+  <tr class="cap"><td></td><td>TOTAL ESTIMADO</td><td></td><td></td><td></td><td class="num">${pesos(d.total)}</td>${abierta ? '<td></td>' : ''}</tr>
+  </tbody></table></div>${abierta ? '<button class="btn" id="rq-item" style="margin-top:6px">+ Ítem</button>' : ''}`;
+  const err = er => aviso('Error: ' + er.message);
+  editable($('#g-rq-cab'), (td, v) => api('t/requisicion/' + id, 'PUT', { [td.dataset.c]: v }));
+  if (abierta) editable($('#g-rq-items'), (td, v) => api('t/requisicion_item/' + td.closest('tr').dataset.id, 'PUT', { [td.dataset.c]: v }));
+  $('#rq-xlsx').onclick = () => (location.href = '/api/xlsx/requisicion/' + id);
+  $('#rq-docx').onclick = () => (location.href = '/api/docx/requisicion/' + id);
+  if ($('#rq-contrato')) $('#rq-contrato').onchange = e => api('t/requisicion/' + id, 'PUT', { contrato_id: Number(e.target.value) }).then(pintarDocs).catch(err);
+  if ($('#rq-item')) $('#rq-item').onclick = () => api('t/requisicion_item', 'POST', { requisicion_id: r.id, cantidad: 1 }).then(pintarDocs).catch(err);
+  $('#g-rq-items').addEventListener('change', e => {
+    if (!e.target.matches('[data-item]')) return;
+    const p = pres.find(p => String(p.id) === e.target.value), tr = e.target.closest('tr');
+    const cambio = { item_id: p ? p.id : null };
+    if (p && !tr.querySelector('[data-c="descripcion"]').dataset.v) Object.assign(cambio, { descripcion: p.descripcion, unidad: p.unidad, vr_unitario: p.vr_unitario });
+    api('t/requisicion_item/' + tr.dataset.id, 'PUT', cambio).then(pintarDocs).catch(err);
+  });
+  $('#g-rq-items').addEventListener('click', e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Quitar este ítem?')) api('t/requisicion_item/' + b.dataset.borrar, 'DELETE').then(pintarDocs).catch(err); });
+  $('#rq-pasos').onclick = async e => {
+    const b = e.target.closest('[data-e]'); if (!b) return;
+    const cambio = { estado: b.dataset.e };
+    if (b.dataset.e === 'Rechazada') { const m = prompt('Motivo del rechazo:'); if (!m) return; cambio.motivo_rechazo = m; }
+    else if (!confirm(`¿${etiqueta[b.dataset.e]} la RQ ${r.numero}?`)) return;
+    try { await api('t/requisicion/' + id, 'PUT', cambio); aviso('RQ ' + r.numero + ': ' + b.dataset.e); await refrescar(); } catch (er) { err(er); }
+  };
+}
 
 // ---------- Liquidación del contrato ----------
 async function vLiquidacion(cont, cid) {
