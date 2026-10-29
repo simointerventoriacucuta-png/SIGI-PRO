@@ -321,6 +321,42 @@ function indicadoresSST(meses) {
   });
 }
 
+// Avance físico a una fecha: programado vs ejecutado ponderado por duración, y SPI
+async function avanceFisico(pid, hoy) {
+  const tareas = (await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', pid)).map(t => ({ ...t, programado: integ.programado(t, hoy) }));
+  const hojas = tareas.filter(t => !t.resumen);
+  const peso = t => Math.max(1, (Date.parse(t.fin) - Date.parse(t.inicio)) / 86400000 || 1);
+  const tot = hojas.reduce((s, t) => s + peso(t), 0) || 1;
+  const prog = hojas.reduce((s, t) => s + t.programado * peso(t), 0) / tot, real = hojas.reduce((s, t) => s + (t.avance_real || 0) * peso(t), 0) / tot;
+  return { hoy, tareas, programado: r2(prog), real: r2(real), spi: prog ? r2(real / prog) : null };
+}
+
+// Datos del informe mensual de interventoría (mes AAAA-MM)
+async function informeMensual(pid, mes) {
+  mes = /^\d{4}-\d{2}$/.test(mes || '') ? mes : new Date().toISOString().slice(0, 7);
+  const ini = mes + '-01', fin = new Date(Date.UTC(+mes.slice(0, 4), +mes.slice(5, 7), 0)).toISOString().slice(0, 10);
+  const enMes = f => f && f >= ini && f <= fin, hoy = new Date().toISOString().slice(0, 10), corte = fin < hoy ? fin : hoy;
+  const r = await resumen(pid);
+  const contratos = r.contratos.map(c => {
+    const hasta = c.actas.filter(a => (a.hasta || a.fecha || '') <= fin);
+    const acumulado = hasta.length ? hasta[hasta.length - 1].acumulado : 0;
+    return { ...c, actas_mes: c.actas.filter(a => enMes(a.hasta || a.fecha)), acumulado_mes: acumulado, pct: c.valor_vigente ? r2((acumulado / c.valor_vigente) * 100) : null };
+  });
+  const del = t => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha`, pid, ini, fin);
+  const social = await db.all('SELECT * FROM social WHERE proyecto_id = ? ORDER BY fecha', pid);
+  const pqrs = social.filter(s => s.tipo === 'PQRS' && s.estado !== 'Cerrado' && s.estado !== 'Respondido');
+  return { mes, ini, fin, hoy, proyecto: r.proyecto, contratos,
+    fisico: await avanceFisico(pid, corte),
+    tramos: await db.all('SELECT * FROM tramo WHERE proyecto_id = ? ORDER BY alineamiento_id, abs_ini', pid),
+    polizas: await db.all('SELECT * FROM poliza WHERE proyecto_id = ? ORDER BY contrato, hasta', pid),
+    sst_ind: indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? AND mes = ?', pid, mes))[0] || null,
+    sst: await del('sst'), ambiental: await del('ambiental'),
+    pmt: await db.all('SELECT * FROM pmt WHERE proyecto_id = ? AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY frente', pid, fin, ini),
+    social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
+    vencimientos: r.vencimientos,
+    director: (await db.get("SELECT nombre FROM usuario WHERE rol = 'director' AND activo = 1 ORDER BY id"))?.nombre || 'Director de interventoría' };
+}
+
 // ---------- HTTP ----------
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
@@ -372,6 +408,7 @@ async function api(req, res, url) {
   const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (r0 === 'xlsx' && r1 === 'presupuesto') { const d = await presupuesto(Number(r2_)); return archivo(`Presupuesto_${d.contrato.tipo}.xlsx`, XLSX, await integ.xlsxPresupuesto(d)); }
   if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
+  if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await integ.docxInforme(d)); }
   if (r0 === 'docx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.docx`, DOCX, await integ.docxActa(d)); }
   if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
     exigir(u, 'item');
@@ -402,15 +439,7 @@ async function api(req, res, url) {
     const p = await db.get('SELECT nombre FROM proyecto WHERE id = ?', Number(r1));
     return archivo('Programa_SIGI.xml', 'application/xml', integ.xmlProject(p?.nombre, await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', Number(r1))));
   }
-  if (r0 === 'programa') {
-    const hoy = q.fecha || new Date().toISOString().slice(0, 10);
-    const tareas = (await db.all('SELECT * FROM tarea WHERE proyecto_id = ? ORDER BY orden, id', Number(r1))).map(t => ({ ...t, programado: integ.programado(t, hoy) }));
-    const hojas = tareas.filter(t => !t.resumen);
-    const peso = t => Math.max(1, (Date.parse(t.fin) - Date.parse(t.inicio)) / 86400000 || 1);
-    const tot = hojas.reduce((s, t) => s + peso(t), 0) || 1;
-    const prog = hojas.reduce((s, t) => s + t.programado * peso(t), 0) / tot, real = hojas.reduce((s, t) => s + (t.avance_real || 0) * peso(t), 0) / tot;
-    return enviar(res, 200, { hoy, tareas, programado: r2(prog), real: r2(real), spi: prog ? r2(real / prog) : null });
-  }
+  if (r0 === 'programa') return enviar(res, 200, await avanceFisico(Number(r1), q.fecha || new Date().toISOString().slice(0, 10)));
   // Autodesk (LandXML de Civil 3D / InfraWorks) y avance en el plano
   if (r0 === 'landxml' && req.method === 'POST') {
     exigir(u, 'alineamiento');
