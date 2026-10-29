@@ -616,6 +616,68 @@ async function avanceFisico(pid, hoy) {
   return { hoy, tareas, programado: r2(prog), real: r2(real), spi: prog ? r2(real / prog) : null };
 }
 
+// Cuadros de control del informe mensual: balance por capítulo, curva S, flujo de anticipo
+// y fotos "antes" del mismo punto fijo.
+async function extrasInforme(pid, contratos, ini, fin, tareas) {
+  const finMes = m => new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
+  for (const c of contratos) {
+    // Balance de cantidades y valores (costo directo) por capítulo, a la fecha de corte
+    const ultima = c.actas.filter(a => (a.hasta || a.fecha || '') <= fin).pop();
+    const filas = ultima ? (await detalleActa(ultima.id)).filas : (await presupuesto(c.id)).items;
+    const delMes = new Map();
+    for (const a of c.actas_mes) for (const f of (await detalleActa(a.id)).filas) if (f.tipo === 1 && f.cant_aprobada) delMes.set(f.id, (delMes.get(f.id) || 0) + f.cant_aprobada);
+    const caps = new Map(), capDe = new Map(filas.filter(f => f.tipo !== 1).map(f => [f.id, f]));
+    const items = [];
+    for (const f of filas.filter(f => f.tipo === 1)) {
+      const vig = f.cantidad_vigente ?? f.cantidad ?? 0, acum = f.acumulado || 0, mesQ = delMes.get(f.id) || 0, vu = f.vr_unitario || 0;
+      const cap = capDe.get(f.padre_id), k = cap ? `${cap.codigo || ''} ${cap.descripcion || ''}`.trim() : 'Sin capítulo';
+      if (!caps.has(k)) caps.set(k, { capitulo: k, contratado: 0, periodo: 0, acumulado: 0, items: 0, mayores: 0 });
+      const g = caps.get(k);
+      g.contratado += vig * vu; g.periodo += mesQ * vu; g.acumulado += acum * vu; g.items++; if (acum - vig > 1e-9) g.mayores++;
+      items.push({ codigo: f.codigo, descripcion: f.descripcion, unidad: f.unidad, contratada: vig, periodo: mesQ, acumulada: acum, saldo: vig - acum, vu });
+    }
+    c.balance = [...caps.values()].map(g => ({ ...g, saldo: g.contratado - g.acumulado, pct: g.contratado ? (g.acumulado / g.contratado) * 100 : 0 }));
+    c.balance_items = items;
+    // Flujo de caja: actas a la fecha, amortización proporcional del anticipo y neto a pagar
+    const ant = (c.valor || 0) * (c.anticipo_pct || 0) / 100;
+    let amortAcum = 0, acum = 0;
+    c.flujo = c.actas.filter(a => (a.hasta || a.fecha || '') <= fin).map(a => {
+      const amort = Math.max(0, Math.min(ant - amortAcum, (a.valor || 0) * (c.anticipo_pct || 0) / 100));
+      amortAcum += amort; acum += a.valor || 0;
+      return { numero: a.numero, corte: a.hasta || a.fecha, estado: a.estado, valor: a.valor || 0, amortizacion: amort, neto: (a.valor || 0) - amort, acumulado: acum, saldo_anticipo: ant - amortAcum };
+    });
+    c.anticipo = ant;
+    // Curva S: programado y ejecutado (financiero) acumulados por mes, desde el inicio hasta el mes del informe
+    c.curva = [];
+    if (c.fecha_inicio && c.fecha_inicio <= fin) {
+      const hojas = (tareas || []).filter(t => !t.resumen && t.inicio && t.fin);
+      const peso = t => Math.max(1, (Date.parse(t.fin) - Date.parse(t.inicio)) / 86400000 || 1), tot = hojas.reduce((s, t) => s + peso(t), 0);
+      const finC = c.fecha_fin_vigente || c.fecha_fin, conPrograma = c.tipo === 'obra' && hojas.length;
+      const prog = f => (conPrograma ? hojas.reduce((s, t) => s + integ.programado(t, f) * peso(t), 0) / tot
+        : finC ? integ.programado({ inicio: c.fecha_inicio, fin: finC }, f) : null);
+      let m = c.fecha_inicio.slice(0, 7), antP = 0, antE = 0;
+      while (m <= fin.slice(0, 7) && c.curva.length < 120) {
+        const fm = finMes(m), pr = prog(fm);
+        const eAcum = c.valor_vigente ? ((c.actas.filter(a => (a.hasta || a.fecha || '') <= fm).pop() || {}).acumulado || 0) / c.valor_vigente * 100 : 0;
+        c.curva.push({ mes: m, prog_mes: pr == null ? null : pr - antP, prog_acum: pr, ejec_mes: eAcum - antE, ejec_acum: eAcum });
+        antP = pr || 0; antE = eAcum;
+        m = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 1)).toISOString().slice(0, 7);
+      }
+      c.curva_base = conPrograma ? 'programa de obra cargado' : 'distribución lineal del plazo vigente';
+    }
+  }
+  // Por cada punto fijo fotografiado en el mes: la primera foto de ese punto (antes del periodo) y la última del mes
+  const puntos = (await db.all(`SELECT DISTINCT punto FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND punto IS NOT NULL AND punto <> '' AND fecha BETWEEN ? AND ?`, pid, ini, fin)).map(r => r.punto);
+  const antes_despues = [], q = `SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND punto = ?`;
+  const conDatos = async f => ({ ...f, datos: Buffer.from((await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', f.id)).datos) });
+  for (const pt of puntos.slice(0, 8)) {
+    const a = await db.get(`${q} AND fecha < ? ORDER BY fecha, id LIMIT 1`, pid, pt, ini);
+    const b = await db.get(`${q} AND fecha BETWEEN ? AND ? ORDER BY fecha DESC, id DESC LIMIT 1`, pid, pt, ini, fin);
+    if (a && b) antes_despues.push({ punto: pt, antes: await conDatos(a), despues: await conDatos(b) });
+  }
+  return { antes_despues };
+}
+
 // Datos del informe mensual de interventoría (mes AAAA-MM)
 async function informeMensual(pid, mes) {
   mes = /^\d{4}-\d{2}$/.test(mes || '') ? mes : new Date().toISOString().slice(0, 7);
@@ -635,8 +697,9 @@ async function informeMensual(pid, mes) {
   const del = t => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha`, pid, ini, fin);
   const social = await db.all('SELECT * FROM social WHERE proyecto_id = ? ORDER BY fecha', pid);
   const pqrs = social.filter(s => s.tipo === 'PQRS' && s.estado !== 'Cerrado' && s.estado !== 'Respondido');
-  return { mes, ini, fin, hoy, proyecto: r.proyecto, contratos,
-    fisico: await avanceFisico(pid, corte),
+  const fisico = await avanceFisico(pid, corte);
+  return { mes, ini, fin, hoy, corte, proyecto: r.proyecto, contratos, ...(await extrasInforme(pid, contratos, ini, fin, fisico.tareas)),
+    fisico,
     tramos: await db.all('SELECT * FROM tramo WHERE proyecto_id = ? ORDER BY alineamiento_id, abs_ini', pid),
     polizas: await db.all('SELECT * FROM poliza WHERE proyecto_id = ? ORDER BY contrato, hasta', pid),
     sst_ind: indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? AND mes = ?', pid, mes))[0] || null,
@@ -653,8 +716,8 @@ async function informeMensual(pid, mes) {
     gastos: await db.all('SELECT g.* FROM gasto g JOIN contrato c ON c.id = g.contrato_id WHERE c.proyecto_id = ? AND g.fecha BETWEEN ? AND ?', pid, ini, fin),
     items_np: await db.all("SELECT i.* FROM item i JOIN contrato c ON c.id = i.contrato_id WHERE c.proyecto_id = ? AND i.otrosi_id IS NOT NULL", pid),
     anexos: await (async () => {
-      const a = await db.all("SELECT tabla, nombre, descripcion, tipo_mime FROM adjunto WHERE proyecto_id = ? AND categoria <> 'Foto' AND fecha BETWEEN ? AND ?", pid, ini, fin), g = {};
-      for (const x of a) { const k = /\.(dwg|dxf|kmz)$/i.test(x.nombre || '') || x.tabla === 'tramo' ? 'planos' : /recibo/i.test(x.descripcion || '') ? 'recibo' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : 'otros'; (g[k] = g[k] || []).push(x); }
+      const a = await db.all("SELECT tabla, registro_id, nombre, descripcion, tipo_mime, fecha FROM adjunto WHERE proyecto_id = ? AND categoria <> 'Foto' AND fecha BETWEEN ? AND ?", pid, ini, fin), g = {};
+      for (const x of a) { const t = `${x.nombre || ''} ${x.descripcion || ''}`, k = /\.(dwg|dxf|kmz|kml)$/i.test(x.nombre || '') || /plano/i.test(t) || ['tramo', 'alineamiento'].includes(x.tabla) ? 'planos' : /recibo/i.test(t) ? 'recibo' : /reuni|comit/i.test(t) ? 'social' : ['ensayo', 'social', 'correspondencia', 'bitacora'].includes(x.tabla) ? x.tabla : 'otros'; (g[k] = g[k] || []).push(x); }
       return g; })(),
     // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
     fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
