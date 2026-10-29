@@ -106,7 +106,8 @@ const CINTA = {
     ['Recursos', [['Personal', 'personal', () => abrir('tabla:personal')], ['Pólizas', 'poliza', () => abrir('tabla:poliza')]]],
   ]],
   control: ['Control de obra', [
-    ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')]]],
+    ['SST', [['Inspecciones y accidentes', 'personal', () => abrir('tabla:sst')], ['Indicadores SST', 'balance', () => abrir('tabla:sst_mes')], ['Matriz de peligros', 'datos', () => abrir('tabla:sst_peligro')], ['Listas de chequeo', 'ensayo', () => abrir('tabla:sst_inspeccion')], ['Informe SST (Word)', 'acta', () => informeSST()]]],
+    ['Anexos SST', [['Permisos y ATS', 'acta', () => abrir('tabla:sst_permiso')], ['Capacitaciones', 'correo', () => abrir('tabla:sst_capacitacion')], ['Trabajadores', 'personal', () => abrir('tabla:sst_trabajador')], ['Entrega de EPP', 'poliza', () => abrir('tabla:sst_epp')], ['PILA / ARL', 'gasto', () => abrir('tabla:sst_seguridad_social')], ['Investigación AT', 'vencimiento', () => abrir('tabla:sst_investigacion')], ['Emergencias', 'balance', () => abrir('tabla:sst_emergencia')], ['Maquinaria', 'costos', () => abrir('tabla:sst_equipo')], ['Comités y cronograma', 'datos', () => abrir('tabla:sst_actividad')], ['Soportes del informe', 'presupuesto', () => abrir('tabla:sst_documento')]]],
     ['Ambiental', [['Fichas PAGA / PMA', 'ensayo', () => abrir('tabla:ambiental')], ['PMT (tránsito)', 'vencimiento', () => abrir('tabla:pmt')]]],
     ['Social', [['Gestión social (PGS) y PQRS', 'correo', () => abrir('tabla:social')]]],
   ]],
@@ -171,7 +172,8 @@ function pintarArbol() {
     h += n('balance:' + ob.id, '📈 Balance de obra', 0) + n('mayores:' + ob.id, '⚖️ Mayores y menores', 0) + n('avances', '📍 Capturas de avance', 0) + n('programa', '🗓️ Programa de obra', 0) + n('plano', '🗺️ Avance en el plano', 0);
     h += n('', '🌳 Ambiental', 0, '', true) + n('tabla:ambiental', 'Fichas PAGA / PMA', 1) + n('tabla:pmt', 'PMT (tránsito)', 1)
       + n('', '🤝 Social', 0, '', true) + n('tabla:social', 'Gestión social y PQRS', 1)
-      + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1);
+      + n('', '⛑️ SST', 0, '', true) + n('tabla:sst', 'Inspecciones y accidentes', 1) + n('tabla:sst_mes', 'Indicadores SST', 1)
+      + SST_ANEXOS.map(t => n('tabla:' + t, TABLAS[t].titulo.replace('SST · ', ''), 1)).join('');
   }
   h += `<div class="seccion interv">CONTRATO DE INTERVENTORÍA · propio</div>`;
   if (it) {
@@ -200,7 +202,7 @@ function tituloDoc(k) {
 function cintaDe(k) {
   const [t, x] = k.split(':');
   if (t === 'contrato') return x;
-  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ambiental: 'control', pmt: 'control', social: 'control' }[x];
+  if (['tabla'].includes(t)) return { bitacora: 'obra', ensayo: 'obra', personal: 'interventoria', poliza: 'interventoria', sst: 'control', sst_mes: 'control', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'control'])), ambiental: 'control', pmt: 'control', social: 'control' }[x];
   if (t === 'programa' || t === 'plano' || t === 'avances') return 'obra';
   if (t === 'graficos') return 'informes';
   if (t === 'acta') return E.res?.contratos.find(c => c.actas.some(a => String(a.id) === x))?.tipo;
@@ -760,7 +762,7 @@ async function subirArchivos(lista, tabla, registroId) {
 async function dialogoAdjuntos(tabla, id) {
   const pintar = async () => {
     const lista = await api(`adjuntos/${E.pid}?tabla=${tabla}&registro_id=${id}`);
-    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', 'ambiental', 'social', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
+    $('#dialogo-form').innerHTML = `<h3>Adjuntos y registro fotográfico</h3>${formularioSubir(['sst', ...SST_ANEXOS, 'ambiental', 'social', 'pmt', 'tramo', 'bitacora', 'ensayo'].includes(tabla))}
       <div class="adjuntos">${lista.map(miniatura).join('') || '<p class="sub">Aún no hay archivos. También puede arrastrarlos a esta ventana.</p>'}</div>
       <div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`;
     const caja = $('#dialogo-form');
@@ -1034,7 +1036,42 @@ async function vCostos(cont, cid) {
 // Tablas sencillas (control y registros)
 const ESTADOS = { vencimiento: 'Pendiente|En trámite|Cumplido|Vencido', personal: 'Propuesto|Aprobado|Vinculado|Por vincular|Retirado',
   poliza: 'Pendiente|Radicada|Aprobada|Vigente|Vencida', correspondencia: 'Abierta|Respondida|Cerrada',
-  sst: 'Abierto|En seguimiento|Cerrado', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+  sst: 'Abierto|En seguimiento|Cerrado', sst_peligro: 'Abierto|En seguimiento|Cerrado', sst_inspeccion: 'Abierto|En seguimiento|Cerrado', sst_permiso: 'Abierto|Cerrado|Suspendido',
+  sst_capacitacion: 'Programada|Realizada|Cancelada', sst_trabajador: 'Activo|Retirado', sst_investigacion: 'Abierto|En seguimiento|Cerrado', sst_emergencia: 'Abierto|Cerrado', sst_equipo: 'Operativo|Fuera de servicio|Retirado', sst_actividad: 'Programada|Ejecutada|Cancelada', sst_documento: 'Cargado|Pendiente|No aplica', ambiental: 'Abierto|En seguimiento|Cerrado', social: 'Abierto|En trámite|Respondido|Cerrado', pmt: 'En trámite|Aprobado|Implementado|Cerrado' };
+// Anexos de SST y preguntas de las listas de chequeo (C cumple, NC no cumple, NA no aplica)
+const SST_ANEXOS = ['sst_peligro', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_trabajador', 'sst_epp', 'sst_seguridad_social', 'sst_investigacion', 'sst_emergencia', 'sst_equipo', 'sst_actividad', 'sst_documento'];
+const ANEXOS_SST = ['Afiliaciones', 'Exámenes médicos ocupacionales', 'Inducciones y evaluaciones', 'Entrega de EPP y dotación', 'Notificación de riesgos', 'Exámenes de retiro', 'Paz y salvos', 'Preoperacionales', 'Charlas y capacitaciones', 'Inspecciones', 'Licencia de salud ocupacional', 'Certificación de pagos (revisor fiscal)', 'Planillas de seguridad social del mes', 'Actas COPASST y COCOLA', 'Certificado ARL de accidentalidad', 'Personal administrativo', 'Matriz de peligros', 'Plan de trabajo anual SST', 'Plan de emergencias', 'Inspecciones programadas y gestión documental', 'Evidencia fotográfica', 'Aprobación del informe por la interventoría'];
+const LISTAS_SST = {
+  EPP: ['Casco con barbuquejo en buen estado', 'Gafas de seguridad', 'Protección auditiva donde hay ruido', 'Guantes según la tarea', 'Botas de seguridad', 'Chaleco reflectivo en la vía', 'Ropa de trabajo / dotación', 'Protección respiratoria donde hay polvo o vapores'],
+  Andamios: ['Apoyado sobre base firme y nivelada', 'Plataforma completa y asegurada', 'Barandas y rodapiés', 'Arriostrado o anclado a la estructura', 'Acceso seguro (escalera)', 'Tarjeta de inspección vigente', 'Trabajadores con certificado y arnés en alturas'],
+  Excavaciones: ['Talud o entibado según la profundidad y el suelo', 'Material excavado retirado del borde', 'Barreras y señalización perimetral', 'Escalera de acceso y salida', 'Inspección diaria por persona competente', 'Redes de servicios identificadas', 'Control de agua (achique)'],
+  Señalización: ['PMT aprobado e implementado', 'Señales preventivas y reglamentarias', 'Conos, canalizadores y barricadas', 'Paleteros con radio y chaleco', 'Iluminación y dispositivos luminosos de noche', 'Delimitación de la zona de trabajo'],
+  Extintores: ['Carga vigente (etiqueta)', 'Manómetro en zona verde', 'Pasador y sello', 'Ubicado, señalizado y accesible', 'Tipo adecuado al riesgo', 'Inspección mensual registrada'],
+  Botiquín: ['Contenido completo', 'Sin elementos vencidos', 'Camilla con inmovilizadores', 'Ubicado y señalizado', 'Brigadista o primer respondiente en el frente'],
+  'Herramientas y equipos': ['Herramientas en buen estado', 'Guardas y protecciones', 'Extensiones y tableros sin daños', 'Maquinaria con preoperacional diario', 'Alarma de reversa y pito'],
+  'Orden y aseo': ['Áreas de tránsito despejadas', 'Materiales apilados y estables', 'Residuos clasificados', 'Baterías sanitarias e hidratación', 'Zona de almacenamiento de combustibles'],
+};
+// Lista de chequeo de una inspección: guarda {pregunta: C|NC|NA} y el servidor calcula el % de cumplimiento
+async function dialogoChequeo(id) {
+  const r = await api('t/sst_inspeccion/' + id), preg = LISTAS_SST[r.tipo] || [], resp = JSON.parse(r.chequeo || '{}');
+  if (!preg.length) return aviso('Escoja primero el tipo de inspección');
+  const f = $('#dialogo-form');
+  f.innerHTML = `<h3>Lista de chequeo · ${esc(r.tipo)} · ${esc(r.fecha || '')}</h3><table class="grilla"><thead><tr><th>Ítem</th><th>C</th><th>NC</th><th>NA</th></tr></thead><tbody>
+  ${preg.map((q, i) => `<tr><td>${esc(q)}</td>${['C', 'NC', 'NA'].map(v => `<td><input type="radio" name="q${i}" value="${v}" ${resp[q] === v ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}</tbody></table>
+  <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" value="si" id="ch-ok">Guardar</button></div>`;
+  $('#dialogo').showModal();
+  $('#ch-ok').onclick = async ev => {
+    ev.preventDefault();
+    const chequeo = {};
+    preg.forEach((q, i) => { const m = f.querySelector(`[name="q${i}"]:checked`); if (m) chequeo[q] = m.value; });
+    try { await api('t/sst_inspeccion/' + id, 'PUT', { chequeo }); $('#dialogo').close(); refrescar(); } catch (e) { aviso('Error: ' + e.message); }
+  };
+}
+// Informe SST mensual del contratista en Word
+function informeSST() {
+  const mes = prompt('Mes del informe SST (AAAA-MM)', hoyISO().slice(0, 7));
+  if (mes && /^\d{4}-\d{2}$/.test(mes)) location.href = `/api/docx/informe-sst/${E.pid}?mes=${mes}`;
+}
 const PROGRAMAS_AMB = 'Desarrollo y aplicación de la gestión ambiental (DAGA)|Actividades constructivas|Gestión hídrica|Biótico (flora y fauna)|Instalaciones temporales, maquinaria y equipos|Gestión social|Seguridad y salud en el trabajo';
 const TABLAS = {
   vencimiento: { titulo: 'Vencimientos y pendientes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo'], ['descripcion', 'Descripción'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['fuente', 'Fuente']] },
@@ -1044,6 +1081,18 @@ const TABLAS = {
   bitacora: { titulo: 'Bitácora de obra', cols: [['fecha', 'Fecha', 'date'], ['clima', 'Clima', 'select:Seco|Lluvia|Lluvia intermitente'], ['frente', 'Frente / abscisa'], ['actividades', 'Actividades'], ['personal_obra', 'Personal', 'num'], ['equipos', 'Equipos'], ['observaciones', 'Observaciones']] },
   sst: { titulo: 'SST · inspecciones, permisos y accidentes', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inspección|Charla|Permiso de trabajo|Entrega de EPP|Verificación seguridad social (PILA/ARL)|Trabajo en alturas|Simulacro|Incidente|Accidente'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['personas', 'Personas', 'num'], ['dias_incapacidad', 'Días incap.', 'num'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   sst_mes: { titulo: 'SST · datos mensuales (Res. 0312 de 2019)', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajadores', 'Trabajadores', 'num'], ['accidentes', 'Accidentes', 'num'], ['accidentes_mortales', 'Mortales', 'num'], ['dias_incapacidad', 'Días incapacidad', 'num'], ['dias_cargados', 'Días cargados', 'num'], ['dias_ausencia', 'Días ausencia', 'num'], ['dias_programados', 'Días programados', 'num'], ['planillas_ok', 'PILA/ARL verificada', 'select:Pendiente|Sí|No'], ['notas', 'Notas']] },
+  sst_peligro: { titulo: 'SST · matriz de peligros (GTC 45)', cols: [['proceso', 'Proceso'], ['actividad', 'Actividad'], ['rutinaria', 'Rutinaria', 'select:Sí|No'], ['peligro', 'Peligro'], ['clasificacion', 'Clasificación', 'select:Biológico|Físico|Químico|Psicosocial|Biomecánico|Condiciones de seguridad|Fenómenos naturales'], ['efectos', 'Efectos posibles'], ['controles', 'Controles existentes'], ['nd', 'ND', 'select:10|6|2|0'], ['ne', 'NE', 'select:4|3|2|1'], ['nc', 'NC', 'select:100|60|25|10'], ['np', 'NP', 'ro'], ['nr', 'NR', 'ro'], ['nivel', 'Nivel', 'ro'], ['expuestos', 'Expuestos', 'num'], ['intervencion', 'Medida de intervención'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_inspeccion: { titulo: 'SST · inspecciones con lista de chequeo', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:' + Object.keys(LISTAS_SST).join('|')], ['frente', 'Frente'], ['inspector', 'Inspector'], ['cumplimiento', '% cumple', 'ro'], ['hallazgos', 'Hallazgos'], ['accion', 'Acción'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_permiso: { titulo: 'SST · permisos de trabajo y ATS', cols: [['fecha', 'Fecha', 'date'], ['numero', 'N.º'], ['tipo', 'Tipo', 'select:Trabajo en alturas|Excavación|Trabajo en caliente|Espacio confinado|Eléctrico|Izaje de cargas'], ['frente', 'Frente'], ['actividad', 'Actividad'], ['altura', 'Altura / prof. m', 'num'], ['trabajadores', 'Trabajadores'], ['coordinador', 'Coordinador'], ['emisor', 'Emisor'], ['ats', 'ATS', 'select:Sí|No'], ['lista_chequeo', 'Lista chequeo', 'select:Sí|No'], ['rescate', 'Plan rescate', 'select:Sí|No|No aplica'], ['vigente_hasta', 'Vigente hasta', 'date'], ['estado', 'Estado', 'select']] },
+  sst_capacitacion: { titulo: 'SST · capacitaciones y charlas', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Inducción|Reinducción|Charla de 5 minutos|Capacitación|Trabajo en alturas|Brigada de emergencias|Notificación de riesgos'], ['tema', 'Tema'], ['facilitador', 'Facilitador'], ['horas', 'Horas', 'num'], ['asistentes', 'Asistentes', 'num'], ['lista', 'Nombres de asistentes'], ['evaluacion', 'Evaluación'], ['estado', 'Estado', 'select']] },
+  sst_trabajador: { titulo: 'SST · trabajadores del contratista', cols: [['nombre', 'Nombre'], ['documento', 'Documento'], ['cargo', 'Cargo'], ['grupo', 'Grupo', 'select:Administrativo|Operativo|Subcontratista'], ['eps', 'EPS'], ['afp', 'AFP'], ['arl', 'ARL'], ['ccf', 'Caja'], ['riesgo', 'Riesgo ARL', 'select:I|II|III|IV|V'], ['ingreso', 'Ingreso', 'date'], ['retiro', 'Retiro', 'date'], ['examen_ingreso', 'Examen ingreso', 'date'], ['examen_periodico', 'Examen periódico', 'date'], ['examen_retiro', 'Examen retiro', 'date'], ['induccion', 'Inducción', 'date'], ['notificacion_riesgos', 'Notif. riesgos', 'date'], ['paz_salvo', 'Paz y salvo', 'select:Sí|No|No aplica'], ['alturas_vence', 'Cert. alturas hasta', 'date'], ['estado', 'Estado', 'select']] },
+  sst_epp: { titulo: 'SST · entrega de EPP y dotación', cols: [['fecha', 'Fecha', 'date'], ['trabajador', 'Trabajador'], ['elemento', 'Elemento', 'select:Casco con barbuquejo|Gafas de seguridad|Protector auditivo|Guantes|Botas de seguridad|Chaleco reflectivo|Overol / dotación|Respirador|Arnés y eslinga|Careta de soldar'], ['cantidad', 'Cant.', 'num'], ['motivo', 'Motivo', 'select:Dotación inicial|Reposición por desgaste|Pérdida|Daño'], ['reposicion', 'Reposición', 'date'], ['firma', 'Firma', 'select:Sí|No']] },
+  sst_seguridad_social: { titulo: 'SST · verificación PILA / ARL por trabajador', cols: [['mes', 'Mes (AAAA-MM)'], ['trabajador', 'Trabajador'], ['planilla', 'Planilla PILA'], ['ibc', 'IBC', 'num'], ['eps', 'EPS', 'select:Sí|No|Pendiente'], ['afp', 'AFP', 'select:Sí|No|Pendiente'], ['arl', 'ARL', 'select:Sí|No|Pendiente'], ['ccf', 'CCF', 'select:Sí|No|Pendiente'], ['verificado', 'Verificado', 'select:Sí|No|Pendiente'], ['observacion', 'Observación']] },
+  sst_investigacion: { titulo: 'SST · investigación de incidentes y accidentes', cols: [['fecha', 'Fecha evento', 'date'], ['tipo', 'Tipo', 'select:Incidente|Accidente leve|Accidente grave|Accidente mortal'], ['trabajador', 'Trabajador'], ['frente', 'Frente'], ['descripcion', 'Descripción'], ['dias_incapacidad', 'Días incap.', 'num'], ['reporte_arl', 'Reporte ARL (FURAT)', 'date'], ['investigado', 'Investigado', 'date'], ['causas', 'Causas'], ['acciones', 'Acciones'], ['responsable', 'Responsable'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
+  sst_emergencia: { titulo: 'SST · plan de emergencias y simulacros', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Plan de emergencias|Simulacro|Brigada|Botiquín|Camilla|Extintores|Punto de encuentro'], ['escenario', 'Escenario'], ['participantes', 'Participantes', 'num'], ['tiempo', 'Tiempo respuesta'], ['resultado', 'Resultado'], ['mejoras', 'Mejoras'], ['proxima', 'Próxima', 'date'], ['estado', 'Estado', 'select']] },
+  sst_equipo: { titulo: 'SST · maquinaria y vehículos (preoperacionales)', cols: [['equipo', 'Equipo / vehículo'], ['placa', 'Placa / serie'], ['modelo', 'Modelo'], ['operador', 'Operador'], ['licencia', 'Licencia hasta', 'date'], ['tecnomecanica', 'Técnico-mecánica hasta', 'date'], ['soat', 'SOAT hasta', 'date'], ['ultimo_preoperacional', 'Último preoperacional', 'date'], ['estado', 'Estado', 'select']] },
+  sst_actividad: { titulo: 'SST · cronograma, COPASST y COCOLA', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:Cronograma SST|Reunión COPASST|Reunión COCOLA|Obligación contractual'], ['actividad', 'Actividad'], ['responsable', 'Responsable'], ['estado', 'Estado', 'select'], ['observacion', 'Observación']] },
+  sst_documento: { titulo: 'SST · soportes del informe (anexos 1 a 22)', cols: [['mes', 'Mes (AAAA-MM)'], ['anexo', 'Anexo', 'select:' + ANEXOS_SST.map((a, i) => (i + 1) + '. ' + a).join('|')], ['descripcion', 'Descripción'], ['estado', 'Estado', 'select']] },
   ambiental: { titulo: 'Seguimiento ambiental (PAGA / PMA)', cols: [['fecha', 'Fecha', 'date'], ['programa', 'Programa', 'select:' + PROGRAMAS_AMB], ['ficha', 'Ficha'], ['actividad', 'Actividad'], ['indicador', 'Indicador'], ['meta', 'Meta', 'num'], ['logro', 'Logro', 'num'], ['cantidad', 'Cantidad', 'num'], ['unidad', 'Und'], ['permiso', 'Permiso'], ['hallazgo', 'Hallazgo'], ['accion', 'Acción'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
   pmt: { titulo: 'Planes de manejo de tránsito (PMT)', cols: [['frente', 'Frente'], ['abs_ini', 'Abscisa inicial'], ['abs_fin', 'Abscisa final'], ['cierre', 'Cierre', 'select:Total|Parcial|Por carril|Nocturno'], ['interferencia', 'Interferencia', 'select:Baja|Media|Alta'], ['radicado', 'Radicado aprobación'], ['aprobado', 'Aprobado', 'date'], ['desde', 'Vigente desde', 'date'], ['hasta', 'Vigente hasta', 'date'], ['dispositivos', 'Dispositivos'], ['ultima_inspeccion', 'Última inspección', 'date'], ['cumple', 'Cumple', 'select:Pendiente|Sí|No'], ['estado', 'Estado', 'select'], ['notas', 'Notas']] },
   social: { titulo: 'Gestión social (PGS) y PQRS', cols: [['fecha', 'Fecha', 'date'], ['tipo', 'Tipo', 'select:PQRS|Reunión de inicio|Reunión de avance|Reunión de finalización|Socialización|Acta de vecindad|Mano de obra local|Cultura vial|Visita'], ['ficha', 'Ficha'], ['comunidad', 'Comunidad / peticionario'], ['descripcion', 'Descripción'], ['asistentes', 'Asistentes', 'num'], ['responsable', 'Responsable'], ['respuesta', 'Respuesta'], ['plazo', 'Plazo', 'date'], ['estado', 'Estado', 'select']] },
@@ -1055,10 +1104,11 @@ async function vTabla(cont, tabla) {
   cont.innerHTML = `<div class="barra-herr"><h2 style="margin:0">${def.titulo}</h2><span class="esp"></span><button class="btn prim" id="t-nuevo">+ Nueva fila</button></div>
   <div class="grilla-cont"><table class="grilla" id="g-tabla"><thead><tr>${def.cols.map(c => `<th class="${c[2] === 'num' ? 'num' : ''}">${c[1]}</th>`).join('')}<th></th></tr></thead><tbody>
   ${filas.map(f => `<tr data-id="${f.id}">${def.cols.map(([k, , t = 'text']) => {
+    if (t === 'ro') return `<td class="${typeof f[k] === 'number' ? 'num' : ''}" title="Calculado">${typeof f[k] === 'number' ? fmt(f[k], k === 'cumplimiento' ? 1 : 0) : esc(f[k] ?? '')}</td>`;
     if (t.startsWith('select')) return celda(f[k], k, 'select', `data-op="${op(t)}"`).replace('<td class="edit', `<td class="edit${k === 'estado' ? '' : ''}`).replace(/>([^<]*)<\/td>$/, k === 'estado' && f[k] ? `><span class="estado ${esc(f[k])}">${esc(f[k])}</span></td>` : '>$1</td>');
-    if (k === 'fecha' || k === 'plazo' || k === 'hasta') { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
+    if (['fecha', 'plazo', 'hasta', 'vigente_hasta', 'alturas_vence', 'proxima', 'reposicion', 'licencia', 'tecnomecanica', 'soat'].includes(k)) { const dd = dias(f[k]); const cls = f.estado !== 'Cumplido' && dd != null && dd <= 3 && tabla !== 'bitacora' && tabla !== 'ensayo' ? 'style="color:#c62828;font-weight:600"' : ''; return celda(f[k], k, 'date', cls); }
     return celda(f[k], k, t);
-  }).join('')}<td class="acciones"><button class="btn clip" data-adj="${tabla}:${f.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
+  }).join('')}<td class="acciones">${tabla === 'sst_inspeccion' ? `<button class="btn" data-chequeo="${f.id}" title="Lista de chequeo">☑</button>` : ''}<button class="btn clip" data-adj="${tabla}:${f.id}" title="Adjuntos y fotos">📎</button><button class="btn" data-borrar="${f.id}" title="Eliminar">✕</button></td></tr>`).join('') || `<tr><td colspan="${def.cols.length + 1}" class="sub">Sin registros</td></tr>`}
   </tbody></table></div>`;
   if (tabla === 'sst_mes') {
     const ind = await api('sst-indicadores/' + E.pid);
@@ -1071,8 +1121,8 @@ async function vTabla(cont, tabla) {
   if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
-  g.addEventListener('click', async e => { const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
-  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social'].includes(tabla) ? { fecha: hoyISO() } : tabla === 'sst_mes' ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
+  g.addEventListener('click', async e => { const ch = e.target.closest('[data-chequeo]'); if (ch) return dialogoChequeo(Number(ch.dataset.chequeo)); const b = e.target.closest('[data-borrar]'); if (b && confirm('¿Eliminar este registro?')) { await api(`t/${tabla}/${b.dataset.borrar}`, 'DELETE'); refrescar(); } });
+  $('#t-nuevo').onclick = async () => { try { await api('t/' + tabla, 'POST', { proyecto_id: E.pid, ...(['bitacora', 'correspondencia', 'ensayo', 'sst', 'ambiental', 'social', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_epp', 'sst_investigacion', 'sst_emergencia', 'sst_actividad'].includes(tabla) ? { fecha: hoyISO() } : ['sst_mes', 'sst_seguridad_social', 'sst_documento'].includes(tabla) ? { mes: hoyISO().slice(0, 7) } : {}) }); refrescar(); } catch (e) { aviso('Error: ' + e.message); } };
 }
 
 // ---------- Panel lateral ----------

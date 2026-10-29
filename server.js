@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Base } = require('./db.js');
 const integ = require('./integraciones.js');
-const { informeFormato } = require('./informe.js');
+const { informeFormato, informeSSTFormato } = require('./informe.js');
 const prov = require('./proveedores.js');
 
 const PUERTO = process.env.PORT != null ? Number(process.env.PORT) : 4027;
@@ -16,18 +16,21 @@ fs.mkdirSync(DATOS, { recursive: true });
 const ESQUEMA = fs.readFileSync(path.join(RAIZ, 'schema.sql'), 'utf8');
 const db = new Base(DATOS);
 
+// Anexos de SST de la interventoría (ver schema.sql)
+const SST_ANEXOS = ['sst_peligro', 'sst_inspeccion', 'sst_permiso', 'sst_capacitacion', 'sst_trabajador', 'sst_epp', 'sst_seguridad_social', 'sst_investigacion', 'sst_emergencia', 'sst_equipo', 'sst_actividad', 'sst_documento'];
+
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
   proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', otrosi_item: 'otrosi_id', gasto: 'contrato_id',
   suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
-  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
+  tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ...Object.fromEntries(SST_ANEXOS.map(t => [t, 'proyecto_id'])), ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id', adjunto: 'proyecto_id', avance: 'proyecto_id',
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
-    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id']],
+    ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ...SST_ANEXOS.map(t => [t, 'proyecto_id']), ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id'], ['adjunto', 'proyecto_id'], ['avance', 'proyecto_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
   adjunto: [['adjunto_dato', 'adjunto_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id'], ['suspension', 'contrato_id'], ['liquidacion', 'contrato_id']],
@@ -42,8 +45,8 @@ const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entid
 // Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
 const PERMISOS = {
   director: '*',
-  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
+  residente: ['avance', 'adjunto', 'item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social'],
+  especialista: ['avance', 'adjunto', 'acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social'],
   administrativo: ['adjunto', 'otrosi', 'otrosi_item', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
@@ -302,6 +305,7 @@ async function avisos(proyectoId) {
     for (const [k, txt] of [['bilateral', 'liquidación bilateral'], ['unilateral', 'liquidación unilateral'], ['judicial', 'liquidación judicial (caducidad)']])
       if (pl[k] >= iso(hoy) && pl[k] <= alerta) out.push({ fecha: pl[k], tipo: 'Liquidación', texto: `Vence el plazo de ${txt} del contrato de ${nombre}`, abrir: 'liquidacion:' + c.id });
   }
+  out.push(...await avisosSST(proyectoId, iso(hoy), limite));
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
@@ -334,7 +338,7 @@ const txt = d => ({ type: 'string', description: d });
 const HERRAMIENTAS = [
   { name: 'consultar_tabla', description: 'Lee registros de una tabla del proyecto actual. Filtros por igualdad exacta; si el valor tiene % se usa LIKE. Devuelve como máximo "limite" filas (50 por defecto).',
     input_schema: obj({ tabla: { type: 'string', enum: ['contrato', 'item', 'acta', 'otrosi', 'suspension', 'liquidacion', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo',
-      'tarea', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social', 'adjunto'] },
+      'tarea', 'tramo', 'sst', 'sst_mes', ...SST_ANEXOS, 'ambiental', 'pmt', 'social', 'adjunto'] },
       filtros: { type: 'object', description: 'Columna → valor, p. ej. {"estado":"Pendiente"}', additionalProperties: { type: ['string', 'number'] } },
       limite: { type: 'integer', minimum: 1, maximum: 200 } }, ['tabla']) },
   { name: 'detalle_acta', description: 'Detalle de un acta parcial o cuenta de cobro: por ítem con movimiento, cantidad contratada, anterior, presentada, aprobada, acumulada, saldo y valores; y los totales.',
@@ -674,6 +678,62 @@ function diasHabiles(desde, n) {
   return d.toISOString().slice(0, 10);
 }
 
+// GTC 45: NP = ND × NE, NR = NP × NC, nivel de riesgo e interpretación
+function nivelRiesgo(nr) {
+  if (nr >= 600) return ['I', 'No aceptable: situación crítica, suspender actividades hasta controlar el riesgo'];
+  if (nr >= 150) return ['II', 'No aceptable o aceptable con control específico: corregir y adoptar medidas de control'];
+  if (nr >= 40) return ['III', 'Mejorable: mejorar si es posible'];
+  return ['IV', 'Aceptable: mantener los controles existentes'];
+}
+// Campos calculados de los anexos de SST (matriz de peligros y lista de chequeo)
+function calcularSST(tabla, d, antes = {}) {
+  const v = k => (d[k] !== undefined ? d[k] : antes[k]);
+  if (tabla === 'sst_peligro' && ['nd', 'ne', 'nc'].some(k => k in d)) {
+    const nd = Number(v('nd')), ne = Number(v('ne')), nc = Number(v('nc'));
+    if (nd > 0 && ne > 0 && nc > 0) { d.np = nd * ne; d.nr = d.np * nc; [d.nivel, d.aceptabilidad] = nivelRiesgo(d.nr); }
+  }
+  if (tabla === 'sst_inspeccion' && 'chequeo' in d) {
+    const r = Object.values(typeof d.chequeo === 'string' ? JSON.parse(d.chequeo || '{}') : d.chequeo || {});
+    if (typeof d.chequeo !== 'string') d.chequeo = JSON.stringify(d.chequeo);
+    const c = r.filter(x => x === 'C').length, nc = r.filter(x => x === 'NC').length;
+    d.cumplimiento = c + nc ? r2((c / (c + nc)) * 100) : null;
+  }
+}
+
+// Avisos de los anexos de SST
+async function avisosSST(pid, hoy, limite) {
+  const out = [], q = (sql, ...a) => db.all(sql, pid, ...a);
+  for (const t of ['sst_peligro', 'sst_inspeccion', 'sst_investigacion'])
+    for (const r of await q(`SELECT * FROM ${t} WHERE proyecto_id = ? AND COALESCE(estado, '') <> 'Cerrado' AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, limite))
+      out.push({ fecha: r.plazo, tipo: 'SST', texto: { sst_peligro: `Medida de intervención (${r.peligro || 'peligro'}): ${r.intervencion || ''}`, sst_inspeccion: `Cierre de hallazgos de la inspección de ${r.tipo || ''}: ${r.accion || r.hallazgos || ''}`, sst_investigacion: `Acciones de la investigación del ${r.tipo || 'evento'}: ${r.acciones || ''}` }[t].trim(), abrir: 'tabla:' + t });
+  for (const r of await q(`SELECT * FROM sst_permiso WHERE proyecto_id = ? AND estado = 'Abierto' AND vigente_hasta IS NOT NULL AND vigente_hasta < ?`, hoy))
+    out.push({ fecha: r.vigente_hasta, tipo: 'SST', texto: `Permiso de ${(r.tipo || 'trabajo').toLowerCase()} ${r.numero || ''} vencido y sin cerrar`, abrir: 'tabla:sst_permiso' });
+  for (const r of await q(`SELECT * FROM sst_permiso WHERE proyecto_id = ? AND estado = 'Abierto' AND (ats <> 'Sí' OR (tipo = 'Trabajo en alturas' AND (lista_chequeo <> 'Sí' OR rescate <> 'Sí')))`))
+    out.push({ fecha: r.fecha || hoy, tipo: 'SST', texto: `Permiso ${r.numero || ''} (${r.tipo || ''}) sin ATS, lista de chequeo o plan de rescate`, abrir: 'tabla:sst_permiso' });
+  for (const r of await q(`SELECT * FROM sst_investigacion WHERE proyecto_id = ? AND investigado IS NULL AND fecha IS NOT NULL`)) {
+    const vence = sumarDias(r.fecha, 15);
+    if (vence <= limite) out.push({ fecha: vence, tipo: 'SST', texto: `Investigar el ${(r.tipo || 'evento').toLowerCase()} del ${r.fecha} (15 días, Res. 1401 de 2007)`, abrir: 'tabla:sst_investigacion' });
+    if (/accidente/i.test(r.tipo || '') && !r.reporte_arl) out.push({ fecha: diasHabiles(r.fecha, 2), tipo: 'SST', texto: `Reportar a la ARL (FURAT) el accidente del ${r.fecha}${r.trabajador ? ' de ' + r.trabajador : ''}`, abrir: 'tabla:sst_investigacion' });
+  }
+  for (const r of await q(`SELECT * FROM sst_trabajador WHERE proyecto_id = ? AND estado = 'Activo' AND alturas_vence IS NOT NULL AND alturas_vence <= ?`, limite))
+    out.push({ fecha: r.alturas_vence, tipo: 'SST', texto: `Vence el certificado de trabajo en alturas de ${r.nombre || 'un trabajador'}`, abrir: 'tabla:sst_trabajador' });
+  for (const r of await q(`SELECT * FROM sst_epp WHERE proyecto_id = ? AND reposicion IS NOT NULL AND reposicion <= ? AND reposicion >= ?`, limite, hoy))
+    out.push({ fecha: r.reposicion, tipo: 'SST', texto: `Reponer ${r.elemento || 'EPP'} a ${r.trabajador || ''}`.trim(), abrir: 'tabla:sst_epp' });
+  for (const r of await q(`SELECT * FROM sst_emergencia WHERE proyecto_id = ? AND COALESCE(estado, '') <> 'Cerrado' AND proxima IS NOT NULL AND proxima <= ?`, limite))
+    out.push({ fecha: r.proxima, tipo: 'SST', texto: `${r.tipo || 'Emergencias'}: próxima revisión o simulacro (${r.escenario || ''})`, abrir: 'tabla:sst_emergencia' });
+  for (const r of await q(`SELECT * FROM sst_equipo WHERE proyecto_id = ? AND estado = 'Operativo'`))
+    for (const [k, n] of [['soat', 'SOAT'], ['tecnomecanica', 'revisión técnico-mecánica'], ['licencia', 'licencia de conducción del operador']])
+      if (r[k] && r[k] <= limite) out.push({ fecha: r[k], tipo: 'SST', texto: `Vence ${n} de ${r.equipo || ''} ${r.placa || ''}`.trim(), abrir: 'tabla:sst_equipo' });
+  for (const r of await q(`SELECT * FROM sst_actividad WHERE proyecto_id = ? AND estado = 'Programada' AND fecha IS NOT NULL AND fecha <= ?`, limite))
+    out.push({ fecha: r.fecha, tipo: 'SST', texto: `${r.tipo || 'Actividad SST'}: ${r.actividad || ''}`, abrir: 'tabla:sst_actividad' });
+  const ultimo = await db.get(`SELECT MAX(fecha) f FROM sst_emergencia WHERE proyecto_id = ? AND tipo = 'Simulacro'`, pid);
+  if (!ultimo.f || ultimo.f < sumarMeses(hoy, -12)) out.push({ fecha: hoy, tipo: 'SST', texto: 'No hay simulacro de emergencia en los últimos 12 meses (Res. 0312 de 2019)', abrir: 'tabla:sst_emergencia' });
+  const mesAnt = sumarMeses(hoy.slice(0, 7) + '-01', -1).slice(0, 7);
+  const pend = await db.get(`SELECT COUNT(*) n FROM sst_seguridad_social WHERE proyecto_id = ? AND mes = ? AND verificado <> 'Sí'`, pid, mesAnt);
+  if (pend.n) out.push({ fecha: hoy, tipo: 'SST', texto: `${pend.n} trabajador(es) sin verificar la PILA de ${mesAnt}`, abrir: 'tabla:sst_seguridad_social' });
+  return out;
+}
+
 // Indicadores obligatorios del SG-SST (Res. 0312 de 2019, art. 30), por mes
 function indicadoresSST(meses) {
   return meses.map(m => {
@@ -785,6 +845,13 @@ async function informeMensual(pid, mes) {
     polizas: await db.all('SELECT * FROM poliza WHERE proyecto_id = ? ORDER BY contrato, hasta', pid),
     sst_ind: indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? AND mes = ?', pid, mes))[0] || null,
     sst: await del('sst'), ambiental: await del('ambiental'),
+    sst_anexos: {
+      peligros: await db.all("SELECT * FROM sst_peligro WHERE proyecto_id = ? AND (COALESCE(estado, '') <> 'Cerrado' OR plazo BETWEEN ? AND ?) ORDER BY nr DESC, id", pid, ini, fin),
+      inspecciones: await del('sst_inspeccion'), permisos: await del('sst_permiso'), capacitaciones: await del('sst_capacitacion'),
+      epp: await del('sst_epp'), investigaciones: await del('sst_investigacion'), emergencias: await del('sst_emergencia'),
+      seguridad_social: await db.all('SELECT * FROM sst_seguridad_social WHERE proyecto_id = ? AND mes = ? ORDER BY trabajador', pid, mes),
+      trabajadores: await db.all("SELECT * FROM sst_trabajador WHERE proyecto_id = ? AND (ingreso IS NULL OR ingreso <= ?) AND (retiro IS NULL OR retiro >= ?) ORDER BY nombre", pid, fin, ini),
+      soportes: await db.all(`SELECT tabla, nombre, descripcion, categoria, fecha FROM adjunto WHERE proyecto_id = ? AND tabla LIKE 'sst%' AND fecha BETWEEN ? AND ? ORDER BY tabla, fecha`, pid, ini, fin) },
     pmt: await db.all('SELECT * FROM pmt WHERE proyecto_id = ? AND (desde IS NULL OR desde <= ?) AND (hasta IS NULL OR hasta >= ?) ORDER BY frente', pid, fin, ini),
     social: social.filter(s => enMes(s.fecha)), pqrs_abiertas: pqrs, pqrs_vencidas: pqrs.filter(s => s.plazo && s.plazo < corte),
     vencimientos: r.vencimientos,
@@ -803,6 +870,32 @@ async function informeMensual(pid, mes) {
     // Registro fotográfico del mes (hasta 24 fotos JPEG o PNG)
     fotos: await Promise.all((await db.all(`SELECT * FROM adjunto WHERE proyecto_id = ? AND categoria = 'Foto' AND tipo_mime IN ('image/jpeg', 'image/png') AND fecha BETWEEN ? AND ? ORDER BY fecha, id LIMIT 24`, pid, ini, fin))
       .map(async a => ({ ...a, datos: Buffer.from((await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', a.id)).datos) }))) };
+}
+
+// Informe SST mensual del contratista: datos del mes y estado de los 22 anexos
+const ANEXOS_SST = ['Afiliaciones', 'Exámenes médicos ocupacionales', 'Inducciones y evaluaciones', 'Entrega de EPP y dotación', 'Notificación de riesgos', 'Exámenes de retiro', 'Paz y salvos', 'Preoperacionales', 'Charlas y capacitaciones', 'Inspecciones', 'Licencia de salud ocupacional', 'Certificación de pagos (revisor fiscal)', 'Planillas de seguridad social del mes', 'Actas COPASST y COCOLA', 'Certificado ARL de accidentalidad', 'Personal administrativo', 'Matriz de peligros', 'Plan de trabajo anual SST', 'Plan de emergencias', 'Inspecciones programadas y gestión documental', 'Evidencia fotográfica', 'Aprobación del informe por la interventoría'];
+// Qué tablas soportan cada anexo además de sst_documento (número de anexo → tablas)
+const FUENTE_ANEXO = { 1: ['sst_trabajador'], 2: ['sst_trabajador'], 3: ['sst_capacitacion'], 4: ['sst_epp'], 5: ['sst_capacitacion'], 6: ['sst_trabajador'], 7: ['sst_trabajador'], 8: ['sst_equipo'], 9: ['sst_capacitacion'], 10: ['sst_inspeccion', 'sst'],
+  13: ['sst_seguridad_social'], 14: ['sst_actividad'], 15: ['sst_investigacion'], 17: ['sst_peligro'], 18: ['sst_actividad'], 19: ['sst_emergencia'], 20: ['sst_permiso', 'sst_investigacion', 'sst_inspeccion'] };
+async function informeSST(pid, mes) {
+  const d = await informeMensual(pid, mes), { ini, fin } = d;
+  const del = t => db.all(`SELECT * FROM ${t} WHERE proyecto_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha`, pid, ini, fin);
+  d.sst_anexos.equipos = await db.all('SELECT * FROM sst_equipo WHERE proyecto_id = ? ORDER BY equipo', pid);
+  d.sst_anexos.actividades = await del('sst_actividad');
+  d.sst_anexos.cronograma = d.sst_anexos.actividades.filter(a => a.tipo === 'Cronograma SST');
+  d.sst_meses = indicadoresSST(await db.all('SELECT * FROM sst_mes WHERE proyecto_id = ? AND mes <= ? ORDER BY mes', pid, mes)).slice(-12);
+  d.sst_mes_datos = await db.get('SELECT * FROM sst_mes WHERE proyecto_id = ? AND mes = ?', pid, mes);
+  d.personal_sst = (await db.all('SELECT * FROM personal WHERE proyecto_id = ?', pid)).filter(x => /sst|siso|seguridad/i.test(x.cargo || ''));
+  const docs = await db.all('SELECT * FROM sst_documento WHERE proyecto_id = ? AND mes = ?', pid, mes);
+  const adj = await db.all(`SELECT tabla, registro_id, categoria FROM adjunto WHERE proyecto_id = ? AND tabla LIKE 'sst%' AND fecha BETWEEN ? AND ?`, pid, ini, fin);
+  const adjDoc = await db.all(`SELECT a.registro_id FROM adjunto a JOIN sst_documento s ON s.id = a.registro_id WHERE a.tabla = 'sst_documento' AND s.proyecto_id = ? AND s.mes = ?`, pid, mes);
+  d.anexos_sst = ANEXOS_SST.map((nombre, i) => {
+    const n = i + 1, propios = docs.filter(x => parseInt(x.anexo) === n);
+    const soportes = adjDoc.filter(a => propios.some(x => x.id === a.registro_id)).length + adj.filter(a => (FUENTE_ANEXO[n] || []).includes(a.tabla)).length
+      + (n === 21 ? d.fotos.filter(f => /^sst/.test(f.tabla || '')).length : 0);
+    return { n, nombre, soportes, estado: propios.some(x => x.estado === 'No aplica') ? 'No aplica' : soportes ? 'Cargado' : 'Pendiente', descripcion: propios.map(x => x.descripcion).filter(Boolean).join('; ') };
+  });
+  return d;
 }
 
 // ---------- HTTP ----------
@@ -885,6 +978,7 @@ async function api(req, res, url) {
   const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (r0 === 'xlsx' && r1 === 'presupuesto') { const d = await presupuesto(Number(r2_)); return archivo(`Presupuesto_${d.contrato.tipo}.xlsx`, XLSX, await integ.xlsxPresupuesto(d)); }
   if (r0 === 'xlsx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.xlsx`, XLSX, await integ.xlsxActa(d)); }
+  if (r0 === 'docx' && r1 === 'informe-sst') { const d = await informeSST(Number(r2_), q.mes); return archivo(`Informe_SST_${d.mes}.docx`, DOCX, await informeSSTFormato(d)); }
   if (r0 === 'docx' && r1 === 'informe') { const d = await informeMensual(Number(r2_), q.mes); return archivo(`Informe_mensual_${d.mes}.docx`, DOCX, await informeFormato(d)); }
   if (r0 === 'docx' && r1 === 'acta') { const d = await detalleActa(Number(r2_)); return archivo(`${d.contrato.tipo === 'obra' ? 'Acta' : 'Cuenta'}_${d.acta.numero}.docx`, DOCX, await integ.docxActa(d)); }
   if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
@@ -1053,7 +1147,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
       const filtro = padre && q[padre] ? ` WHERE ${padre} = ?` : '';
-      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', ambiental: 'fecha DESC', pmt: 'id', social: 'fecha DESC' }[tabla] || 'id';
+      const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC', tarea: 'orden, id', tramo: 'alineamiento_id, abs_ini', sst: 'fecha DESC', sst_mes: 'mes DESC', sst_inspeccion: 'fecha DESC', sst_permiso: 'fecha DESC', sst_capacitacion: 'fecha DESC', sst_epp: 'fecha DESC', sst_seguridad_social: 'mes DESC, trabajador', sst_investigacion: 'fecha DESC', sst_emergencia: 'fecha DESC', sst_trabajador: 'nombre', sst_peligro: 'nr DESC, id', sst_equipo: 'equipo', sst_actividad: 'fecha DESC', sst_documento: 'mes DESC, anexo', ambiental: 'fecha DESC', pmt: 'id', social: 'fecha DESC' }[tabla] || 'id';
       return enviar(res, 200, await db.all(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`, ...(filtro ? [Number(q[padre])] : [])));
     }
     if (req.method !== 'GET') exigir(u, tabla);
@@ -1067,6 +1161,7 @@ async function api(req, res, url) {
       if (tabla === 'suspension' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM suspension WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'avance') await prepararAvance(d, u);
+      calcularSST(tabla, d);
       const k = Object.keys(d);
       const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
       if (tabla === 'avance') await vincularAvance(r.id);
@@ -1084,6 +1179,7 @@ async function api(req, res, url) {
       if (tabla === 'social' && d.tipo === 'PQRS' && !antes.plazo && !d.plazo) d.plazo = diasHabiles(d.fecha || antes.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'item' && d.vr_unitario != null && d.vr_unitario !== antes.vr_unitario) await precioLibre(id);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
+      calcularSST(tabla, d, antes);
       if (tabla === 'avance') { await prepararAvance(d, u, antes); if (k.length) await moverAvance(antes, -1); }
       if (k.length) await db.run(`UPDATE ${tabla} SET ${Object.keys(d).map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
       if (tabla === 'avance' && k.length) {
