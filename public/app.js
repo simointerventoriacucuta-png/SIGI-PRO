@@ -64,6 +64,7 @@ const ICONOS = {
   mayores: I('<path d="M5 22l7-7 5 5 10-10"/><path d="M21 10h6v6"/>', '#c62828'),
   informe: I('<path d="M8 4h11l6 6v18H8z"/><path d="M19 4v6h6"/><path d="M12 22v-4M16 22v-7M20 22v-5"/>'),
   memoria: I('<circle cx="9" cy="9" r="4"/><circle cx="23" cy="9" r="4"/><circle cx="16" cy="23" r="4"/><path d="M12 11l3 9M20 11l-3 9M13 9h6"/>', '#6a1b9a'),
+  asistente: I('<path d="M16 3l3 9 9 4-9 3-3 10-3-10-9-3 9-4z"/>', '#1f5fa8'),
   datos: I('<circle cx="16" cy="16" r="4"/><path d="M16 3v4M16 25v4M3 16h4M25 16h4M7 7l3 3M22 22l3 3M7 25l3-3M22 10l3-3"/>', '#555'),
 };
 
@@ -82,7 +83,7 @@ const CINTA = {
   inicio: ['Inicio', [
     ['Proyecto', [['Tablero', 'tablero', () => abrir('tablero')], ['Datos del proyecto', 'datos', () => abrir('proyecto')], ['Nuevo proyecto', 'nuevo', nuevoProyecto]]],
     ['Seguimiento', [['Vencimientos', 'vencimiento', () => abrir('tabla:vencimiento')], ['Correspondencia', 'correo', () => abrir('tabla:correspondencia')]]],
-    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente (Claude)', 'memoria', () => mostrarLateral('asistente')], ['Clave del asistente', 'nube', configurarAsistente]]],
+    ['Conocimiento', [['Memoria del proyecto', 'memoria', () => mostrarLateral('memoria')], ['Asistente ✦', 'asistente', abrirAsistente], ['Clave del asistente', 'nube', configurarAsistente]]],
     ['Equipo', [['Usuarios', 'personal', () => abrir('usuarios')], ['Auditoría', 'bitacora', () => abrir('auditoria')]]],
     ['Nube', [['Sincronización', 'nube', dialogoSync], ['Sincronizar ahora', 'sincronizar', sincronizarAhora, () => E.res?.sincronizacion?.modo === 'nube']]],
   ]],
@@ -224,7 +225,7 @@ async function pintarDocs() {
   $('#ruta-doc').textContent = E.res ? [E.res.proyecto.nombre, tit].filter(Boolean).join('  ›  ') : '';
   $('#titulo-ventana').textContent = (tit ? tit + ' - ' : '') + 'SIGI Pro';
   $('#pestanas-doc').innerHTML = E.docs.map(k => `<div class="pestana-doc ${k === E.activo ? 'activo' : ''}" data-k="${k}">${esc(tituloDoc(k))}<button class="cerrar" title="Cerrar">✕</button></div>`).join('');
-  pintarCinta(); pintarArbol();
+  pintarCinta(); pintarArbol(); pintarSugerencias();
   const cont = $('#contenido-doc');
   if (!E.activo) { cont.innerHTML = '<div class="vacio">Abra un elemento del explorador o use la cinta de opciones.</div>'; return; }
   const [t, x] = E.activo.split(':');
@@ -1004,26 +1005,134 @@ async function pintarLateral() {
 
 // ---------- Asistente (Claude) ----------
 E.chat = [];
+// Markdown sencillo: negrita, código, títulos, listas y tablas (el HTML se escapa antes)
+function md(t) {
+  const linea = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  const celdas = s => s.trim().replace(/^\||\|$/g, '').split('|').map(x => x.trim());
+  const out = [], ls = String(t || '').split('\n');
+  for (let i = 0; i < ls.length; i++) {
+    const l = ls[i];
+    if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|?[\s:|-]+\|?\s*$/.test(ls[i + 1] || '') && (ls[i + 1] || '').includes('-')) {
+      let h = `<table class="md-tabla"><tr>${celdas(l).map(c => `<th>${linea(c)}</th>`).join('')}</tr>`; i += 2;
+      while (i < ls.length && /^\s*\|.*\|\s*$/.test(ls[i])) h += `<tr>${celdas(ls[i++]).map(c => `<td>${linea(c)}</td>`).join('')}</tr>`;
+      out.push(h + '</table>'); i--; continue;
+    }
+    const lista = l.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/);
+    if (lista) {
+      const tag = lista[1] ? 'ol' : 'ul'; let h = `<${tag}>`;
+      while (i < ls.length && (ls[i].match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/))) h += `<li>${linea(ls[i++].match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/)[1])}</li>`;
+      out.push(h + `</${tag}>`); i--; continue;
+    }
+    const tit = l.match(/^#{1,4}\s+(.*)$/);
+    out.push(tit ? `<div class="md-titulo">${linea(tit[1])}</div>` : l.trim() ? `<div>${linea(l)}</div>` : '<div class="md-espacio"></div>');
+  }
+  return out.join('');
+}
+// Sugerencias rápidas según la vista abierta
+const SUGERENCIAS = {
+  tablero: ['Resume el estado del contrato', '¿Qué vence esta semana?', '¿Cuáles son los principales riesgos del proyecto?'],
+  acta: ['¿Qué ítems tienen mayor cantidad?', '¿Hay ítems que superen la cantidad contratada?', 'Resume esta acta'],
+  presupuesto: ['¿Cuáles son los ítems de mayor valor?', 'Resume el presupuesto por capítulos'],
+  balance: ['¿Cuánto falta por ejecutar?', 'Resume el balance del contrato'],
+  mayores: ['¿Qué ítems tienen mayores cantidades?', '¿Cuánto suman las mayores y menores cantidades?'],
+  costos: ['¿Cuál es el margen de la interventoría?', '¿En qué ítems se gasta más de lo presupuestado?'],
+  gastos: ['¿En qué se ha gastado más?'],
+  otrosis: ['Resume los otrosíes y su efecto en valor y plazo'],
+  contrato: ['¿Cuál es el valor y el plazo vigentes?'],
+  sst: ['Analiza los indicadores del mes'],
+  'tabla:vencimiento': ['¿Qué vence esta semana?', 'Crea un vencimiento para el informe mensual'],
+  'tabla:correspondencia': ['¿Qué oficios esperan respuesta?', 'Registra una PQRS recibida hoy'],
+  'tabla:bitacora': ['Resume la bitácora de la última semana', 'Registra la bitácora de hoy'],
+  'tabla:poliza': ['¿Qué pólizas vencen pronto?'],
+  'tabla:ensayo': ['¿Hay ensayos con resultados no conformes?'],
+  'tabla:personal': ['¿El personal cumple con la dedicación propuesta?'],
+};
+const sugerencias = () => { const k = E.activo || ''; return SUGERENCIAS[k] || SUGERENCIAS[k.split(':')[0]] || SUGERENCIAS.tablero; };
+function pintarSugerencias() {
+  const s = $('#chat-sug'); if (!s) return;
+  s.innerHTML = sugerencias().map(t => `<button class="sug" data-sug="${esc(t)}">${esc(t)}</button>`).join('');
+}
+function pintarMensajes() {
+  const chat = $('#chat'); if (!chat) return;
+  chat.innerHTML = E.chat.map((m, i) => `<div class="msg ${m.role}">${m.role === 'user' ? esc(m.content).replace(/\n/g, '<br>') : md(m.content)}${
+    m.estado ? `<div class="pensando">${esc(m.estado)}</div>` : ''}${m.pend ? `<div class="confirmar"><b>¿Confirma esta acción?</b>${m.pend.acciones.map(a => `<div>• ${esc(a)}</div>`).join('')}
+    <div class="acciones"><button class="btn" data-conf="0" data-i="${i}">Cancelar</button><button class="btn prim" data-conf="1" data-i="${i}">Guardar</button></div></div>` : ''}</div>`).join('')
+    || `<p class="sub">Pregunte sobre el proyecto: saldos, actas, vencimientos, riesgos… El asistente consulta la base y le pide confirmación antes de guardar algo.</p>${E.sinClave ? '<p class="aviso-clave">⚠️ Falta la clave de la API de Claude. El director la configura en <b>Inicio → Asistente → Clave del asistente</b>.</p>' : ''}`;
+  chat.scrollTop = chat.scrollHeight;
+}
 function pintarAsistente(c) {
-  const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-  c.innerHTML = `<div id="chat" class="chat">${E.chat.map(m => `<div class="msg ${m.role}">${md(m.content)}</div>`).join('') || '<p class="sub">Pregunte sobre el proyecto: saldos, actas, vencimientos, riesgos…</p>'}</div>
-    <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter"></textarea>`;
-  const txt = $('#chat-txt'), chat = $('#chat'); chat.scrollTop = chat.scrollHeight;
-  txt.onkeydown = async e => {
-    if (e.key !== 'Enter' || e.shiftKey || !txt.value.trim()) return;
-    e.preventDefault();
-    E.chat.push({ role: 'user', content: txt.value.trim() }); E.chat.push({ role: 'assistant', content: 'Pensando…' }); pintarAsistente(c);
-    try { const r = await api('asistente/' + E.pid, 'POST', { mensajes: E.chat.slice(0, -1) }); E.chat[E.chat.length - 1].content = r.texto; }
-    catch (er) { E.chat[E.chat.length - 1].content = '⚠️ ' + er.message; }
-    if (E.lateral === 'asistente') pintarAsistente(c);
-  };
+  c.innerHTML = `<div class="asistente"><div id="chat" class="chat"></div><div id="chat-sug" class="chat-sug"></div>
+    <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter (Mayús+Enter: nueva línea)"></textarea>
+    <div class="chat-pie"><span class="sub">✦ Claude · Ctrl+J</span><button class="btn" id="chat-limpiar">Nueva conversación</button></div></div>`;
+  pintarMensajes(); pintarSugerencias();
+  const txt = $('#chat-txt');
+  txt.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(txt.value); } };
+  $('#chat-sug').onclick = e => { const b = e.target.closest('[data-sug]'); if (b) preguntar(b.dataset.sug); };
+  $('#chat-limpiar').onclick = () => { if (!E.chatOcupado) { E.chat = []; pintarMensajes(); } };
+  $('#chat').onclick = e => { const b = e.target.closest('[data-conf]'); if (b) confirmarAccion(Number(b.dataset.i), b.dataset.conf === '1'); };
   txt.focus();
+}
+function abrirAsistente() {
+  mostrarLateral('asistente');
+  api('asistente/config').then(s => { E.sinClave = !s.configurado; if (!E.chat.length) pintarMensajes(); }).catch(() => {});
+}
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); if (!$('#dialogo').open) abrirAsistente(); } });
+$('#btn-asistente').onclick = abrirAsistente;
+
+async function preguntar(texto) {
+  texto = String(texto || '').trim();
+  if (!texto || E.chatOcupado) return;
+  if ($('#chat-txt')) $('#chat-txt').value = '';
+  E.chat.push({ role: 'user', content: texto });
+  const historial = E.chat.map(m => ({ role: m.role, content: m.content }));
+  E.chat.push({ role: 'assistant', content: '' });
+  await conversar({ mensajes: historial, vista: E.activo, titulo: E.activo ? tituloDoc(E.activo) : '' });
+}
+async function confirmarAccion(i, aprobar) {
+  const m = E.chat[i]; if (!m?.pend || E.chatOcupado) return;
+  const id = m.pend.id; m.pend = null;
+  m.content += aprobar ? '\n\n✔ Acción confirmada.\n\n' : '\n\n✖ Acción cancelada.\n\n';
+  E.chat.push(E.chat.splice(i, 1)[0]);
+  await conversar({ continuar: id, aprobar });
+}
+const NOMBRE_HERR = { consultar_tabla: 'Consultando la base', detalle_acta: 'Revisando el acta', presupuesto: 'Leyendo el presupuesto', costos_interventoria: 'Revisando los costos', avisos: 'Revisando los avisos', buscar: 'Buscando en el proyecto' };
+// Lee la respuesta en tiempo real (eventos SSE) y va pintando el último mensaje
+async function conversar(cuerpo) {
+  const m = E.chat[E.chat.length - 1];
+  E.chatOcupado = true; m.estado = 'Pensando…'; pintarMensajes();
+  try {
+    const r = await fetch('/api/asistente/' + E.pid, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Usuario': E.usuario?.id || '' }, body: JSON.stringify(cuerpo) });
+    if (!(r.headers.get('content-type') || '').includes('event-stream')) { const d = await r.json(); throw new Error(d.error || r.statusText); }
+    const lector = r.body.getReader(), dec = new TextDecoder();
+    let resto = '', guardo = false;
+    for (;;) {
+      const { value, done } = await lector.read(); if (done) break;
+      resto += dec.decode(value, { stream: true });
+      const partes = resto.split('\n\n'); resto = partes.pop();
+      for (const p of partes) {
+        const ev = (p.match(/^event: (.*)$/m) || [])[1], d = JSON.parse((p.match(/^data: (.*)$/m) || [])[1] || '{}');
+        if (ev === 'texto') { m.content += d.t; m.estado = 'Escribiendo…'; }
+        if (ev === 'herramienta') m.estado = (NOMBRE_HERR[d.nombre] || 'Consultando') + '…';
+        if (ev === 'confirmar') m.pend = d;
+        if (ev === 'guardado') guardo = true;
+        if (ev === 'error') m.content += '\n\n⚠️ ' + d.mensaje;
+      }
+      pintarMensajes();
+    }
+    if (guardo) await refrescar();
+  } catch (er) {
+    m.content += (m.content ? '\n\n' : '') + '⚠️ ' + er.message;
+    if (/clave/i.test(er.message)) E.sinClave = true;
+  }
+  m.estado = null; m.content = m.content.trim() || (m.pend ? 'Necesito su confirmación:' : 'Sin respuesta.');
+  E.chatOcupado = false;
+  if (E.lateral === 'asistente') pintarMensajes();
 }
 async function configurarAsistente() {
   const s = await api('asistente/config');
   const clave = prompt((s.configurado ? 'El asistente ya tiene clave. ' : '') + 'Pegue la clave de la API de Claude (console.anthropic.com). Se guarda solo en este equipo:');
   if (!clave) return;
-  try { await api('asistente/config', 'POST', { clave }); aviso('Clave del asistente guardada'); } catch (e) { aviso('Error: ' + e.message); }
+  try { await api('asistente/config', 'POST', { clave }); E.sinClave = false; aviso('Clave del asistente guardada'); } catch (e) { aviso('Error: ' + e.message); }
 }
 
 // ---------- Sincronización con la nube (Turso) ----------
