@@ -426,3 +426,32 @@ CREATE TABLE IF NOT EXISTS acta_requisito (
   referencia TEXT,                  -- radicado, folio o enlace de SECOP II
   observacion TEXT
 );
+
+-- Requisiciones (RQ): pedidos internos de bienes o servicios, con aprobación del director
+CREATE TABLE IF NOT EXISTS requisicion (
+  id INTEGER PRIMARY KEY,
+  proyecto_id INTEGER NOT NULL REFERENCES proyecto(id) ON DELETE CASCADE,
+  contrato_id INTEGER REFERENCES contrato(id) ON DELETE CASCADE,
+  numero INTEGER NOT NULL,
+  fecha TEXT,
+  solicitante TEXT,
+  frente TEXT,
+  justificacion TEXT,
+  estado TEXT DEFAULT 'Borrador',   -- Borrador, Solicitada, Aprobada, Rechazada, Atendida
+  aprobado_por TEXT,
+  fecha_aprobacion TEXT,
+  motivo_rechazo TEXT,
+  proveedor TEXT,
+  documento TEXT,                   -- factura u orden con que se atendió
+  fecha_atencion TEXT,
+  gasto_id INTEGER                  -- gasto creado al atenderla (contrato de interventoría)
+);
+CREATE TABLE IF NOT EXISTS requisicion_item (
+  id INTEGER PRIMARY KEY,
+  requisicion_id INTEGER NOT NULL REFERENCES requisicion(id) ON DELETE CASCADE,
+  item_id INTEGER REFERENCES item(id) ON DELETE SET NULL,
+  descripcion TEXT,
+  unidad TEXT,
+  cantidad REAL DEFAULT 0,
+  vr_unitario REAL DEFAULT 0
+);
