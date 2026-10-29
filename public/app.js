@@ -140,7 +140,7 @@ if (leerLocal('cinta-plegada')) $('.cinta').classList.add('plegada');
 // Menú Archivo (como la vista Backstage de Office)
 function menuArchivo() {
   const m = $('#menu-archivo');
-  const ops = [['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
+  const ops = [['✦ Leer documento con IA', leerDocumentoIA], null, ['Nuevo proyecto', nuevoProyecto], ['Datos del proyecto', () => abrir('proyecto')], null, ['Exportar presupuesto a Excel', () => enPresupuesto() ? exportarPresupuesto() : aviso('Abra un presupuesto')],
     ['Informe mensual (Word)', informeMensual], null, ['Sincronización entre computadores', dialogoSync], ['Usuarios', () => abrir('usuarios')], ['Auditoría', () => abrir('auditoria')], ['Cambiar de usuario', elegirUsuario], null, ['Acerca de SIGI Pro', () => $('#btn-acerca').click()]];
   m.innerHTML = ops.map((o, i) => (o ? `<button data-i="${i}">${o[0]}</button>` : '<hr>')).join('');
   m.hidden = !m.hidden;
@@ -150,6 +150,7 @@ document.addEventListener('click', e => { if (!e.target.closest('#menu-archivo')
 $('#btn-actualizar').onclick = () => refrescar().then(() => aviso('Actualizado'));
 $('#btn-inicio-rapido').onclick = () => abrir('tablero');
 $('#btn-captura').onclick = () => capturarAvance();
+$('#btn-doc-ia').onclick = () => leerDocumentoIA();
 document.addEventListener('keydown', e => { if (e.key === 'F5') { e.preventDefault(); refrescar(); } });
 $('#grupos-cinta').addEventListener('click', e => {
   const b = e.target.closest('.btn-cinta'); if (!b || b.disabled) return;
@@ -1066,6 +1067,7 @@ async function vTabla(cont, tabla) {
     ${ind.map(m => `<tr><td>${esc(m.mes)}</td><td class="num">${fmt(m.frecuencia)}</td><td class="num">${fmt(m.severidad)}</td><td class="num">${fmt(m.mortalidad)}</td><td class="num">${fmt(m.ausentismo)}</td><td>${esc(m.planillas_ok)}</td></tr>`).join('') || '<tr><td colspan="6" class="sub">Agregue los datos del mes arriba</td></tr>'}
     </tbody></table></div><p class="sub">Frecuencia = AT del mes ÷ trabajadores × 100 · Severidad = (días de incapacidad + días cargados) ÷ trabajadores × 100 · Ausentismo = días de ausencia ÷ días programados × 100. Verifique las fórmulas con el texto oficial del Ministerio del Trabajo.</p>`);
   }
+  if (tabla === 'poliza') { $('#t-nuevo').insertAdjacentHTML('beforebegin', '<button class="btn" id="t-poliza-ia" title="Suba el PDF o la foto de la póliza: la IA lee los amparos y usted confirma">📄 Leer póliza con IA</button> '); $('#t-poliza-ia').onclick = leerDocumentoIA; }
   if (tabla === 'social') cont.insertAdjacentHTML('beforeend', '<p class="sub">Para las PQRS el plazo se calcula solo: 15 días hábiles (Ley 1755 de 2015), sin contar sábados ni domingos; ajuste los festivos a mano.</p>');
   const g = $('#g-tabla');
   editable(g, (td, v) => api(`t/${tabla}/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
@@ -1157,12 +1159,13 @@ function pintarMensajes() {
 function pintarAsistente(c) {
   c.innerHTML = `<div class="asistente"><div id="chat" class="chat"></div><div id="chat-sug" class="chat-sug"></div>
     <textarea id="chat-txt" class="chat-txt" placeholder="Escriba su pregunta y pulse Enter (Mayús+Enter: nueva línea)"></textarea>
-    <div class="chat-pie"><span class="sub">✦ ${esc(E.proveedorIA || 'Gemini')} · Ctrl+J</span><button class="btn" id="chat-limpiar">Nueva conversación</button></div></div>`;
+    <div class="chat-pie"><span class="sub">✦ ${esc(E.proveedorIA || 'Gemini')} · Ctrl+J</span><span><button class="btn" id="chat-poliza" title="Suba cualquier documento u hoja (PDF, foto, Word, Excel) y la IA registra lo que dice">📄 Subir documento</button> <button class="btn" id="chat-limpiar">Nueva conversación</button></span></div></div>`;
   pintarMensajes(); pintarSugerencias();
   const txt = $('#chat-txt');
   txt.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); preguntar(txt.value); } };
   $('#chat-sug').onclick = e => { const b = e.target.closest('[data-sug]'); if (b) preguntar(b.dataset.sug); };
   $('#chat-limpiar').onclick = () => { if (!E.chatOcupado) { E.chat = []; pintarMensajes(); } };
+  $('#chat-poliza').onclick = leerDocumentoIA;
   $('#chat').onclick = e => { const b = e.target.closest('[data-conf]'); if (b) confirmarAccion(Number(b.dataset.i), b.dataset.conf === '1'); };
   txt.focus();
 }
@@ -1255,6 +1258,56 @@ async function configurarAsistente() {
       $('#dialogo').close(); aviso('Asistente configurado'); abrirAsistente();
     } catch (e) { $('#ia-ayuda').textContent = 'Error: ' + e.message; }
   };
+}
+
+// ---------- Documentos leídos por la IA ----------
+// El usuario sube cualquier archivo (PDF, foto, Word, Excel, CSV); Gemini dice qué es y propone los registros.
+// El usuario revisa cada tarjeta y al guardar se crean los registros con el archivo adjunto.
+const NOMBRE_TABLA = { poliza: 'Pólizas', correspondencia: 'Correspondencia', ensayo: 'Ensayos', gasto: 'Gastos reales', otrosi: 'Otrosíes', social: 'Gestión social', item: 'Presupuesto', personal: 'Personal', vencimiento: 'Vencimientos', avance: 'Capturas de avance' };
+const OCULTOS = ['proyecto_id', 'contrato_id'];
+// Campos que se muestran aunque estén vacíos (para completarlos)
+const SIEMPRE = { avance: ['item_id', 'cantidad'] };
+function leerDocumentoIA() {
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf,image/*,.docx,.xlsx,.csv,.txt';
+  i.onchange = async () => {
+    const f = i.files[0]; if (!f) return;
+    const archivo = await prepararArchivo(f);
+    const caja = $('#dialogo-form');
+    caja.innerHTML = `<h3>✦ Leyendo el documento…</h3><p class="sub">${esc(f.name)} · La IA está identificando qué es y qué hay que registrar. Puede tardar un minuto.</p><div class="cargando"></div>`;
+    if (!$('#dialogo').open) $('#dialogo').showModal();
+    let d;
+    try { d = await api('asistente/documento/' + E.pid, 'POST', archivo); }
+    catch (e) { caja.innerHTML = `<h3>No se pudo leer el documento</h3><p>${esc(e.message)}</p><div class="acciones"><button class="btn prim" value="ok">Cerrar</button></div>`; return; }
+    const ob = contrato('obra');
+    E.itemsObra = d.propuestas.some(p => p.tabla === 'avance') && ob ? [{ id: '', codigo: '', descripcion: '— elija —' }, ...(await api('presupuesto/' + ob.id)).items.filter(i => i.tipo === 1)] : [];
+    const tarjeta = (p, k) => `<div class="propuesta ${p.permitido ? '' : 'sin-permiso'}" data-k="${k}">
+      <label class="prop-cab"><input type="checkbox" data-incluir ${p.permitido ? 'checked' : 'disabled'}> <b>${esc(p.titulo)}</b> <span class="etiqueta">${esc(NOMBRE_TABLA[p.tabla] || p.tabla)}</span>${p.permitido ? '' : ' <span class="sub">(su rol no puede registrar aquí)</span>'}</label>
+      <div class="prop-campos">${Object.entries(p.datos).filter(([c, v]) => !OCULTOS.includes(c) && ((v != null && v !== '') || (SIEMPRE[p.tabla] || []).includes(c))).map(([c, v]) => c === 'item_id' ? `<label>ítem del presupuesto<select data-c="item_id" data-num="1">${E.itemsObra.map(i => `<option value="${i.id}" ${i.id === v ? 'selected' : ''}>${esc(i.codigo || '')} ${esc(i.descripcion)} (${esc(i.unidad || '')})</option>`).join('')}</select></label>` : `<label>${esc(c.replace(/_/g, ' '))}<input data-c="${esc(c)}" value="${esc(v ?? '')}"></label>`).join('')}</div></div>`;
+    caja.innerHTML = `<h3>✦ ${esc(d.resumen || 'Documento leído')}</h3>
+      ${d.observaciones ? `<p class="aviso-clave">💡 ${esc(d.observaciones)}</p>` : ''}
+      <p class="sub">Revise y corrija; desmarque lo que no quiera registrar. El archivo quedará adjunto a cada registro (salvo ítems de presupuesto).</p>
+      <div class="propuestas">${d.propuestas.map(tarjeta).join('') || '<p class="sub">No encontré nada para registrar en este documento. Puede adjuntarlo a mano con 📎.</p>'}</div>
+      <p class="sub" id="doc-msg"></p>
+      <div class="acciones"><button class="btn" value="no">Cancelar</button><button class="btn prim" id="doc-guardar" ${d.propuestas.some(p => p.permitido) ? '' : 'disabled'}>Registrar seleccionados</button></div>`;
+    $('#doc-guardar').onclick = async ev => {
+      ev.preventDefault();
+      const elegidas = [...caja.querySelectorAll('.propuesta')].filter(t => t.querySelector('[data-incluir]').checked);
+      let n = 0;
+      try {
+        for (const t of elegidas) {
+          const p = d.propuestas[t.dataset.k], datos = { ...p.datos };
+          t.querySelectorAll('[data-c]').forEach(e => { const v = e.value.trim(); datos[e.dataset.c] = v === '' ? null : e.dataset.num || typeof p.datos[e.dataset.c] === 'number' || ['cantidad', 'largo', 'ancho', 'espesor', 'piezas', 'abs_ini', 'abs_fin', 'valor', 'porcentaje'].includes(e.dataset.c) ? num(v) : v; });
+          if (p.tabla === 'avance' && !datos.item_id) throw new Error(`Elija el ítem del presupuesto en: ${p.titulo}`);
+          if (p.tabla === 'avance' && datos.cantidad == null) delete datos.cantidad;
+          $('#doc-msg').textContent = `Registrando ${++n} de ${elegidas.length}…`;
+          const r = await api('t/' + p.tabla, 'POST', datos);
+          if (p.tabla !== 'item') await api('adjunto', 'POST', { proyecto_id: E.pid, tabla: p.tabla, registro_id: r.id, categoria: 'Documento', descripcion: d.resumen || f.name, ...archivo });
+        }
+        $('#dialogo').close(); aviso(`${n} registro(s) creados desde ${f.name}`); refrescar();
+      } catch (e) { $('#doc-msg').textContent = 'Error: ' + e.message; }
+    };
+  };
+  i.click();
 }
 
 // ---------- Sincronización con la nube (Turso) ----------

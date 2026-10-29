@@ -259,3 +259,15 @@ tr.tachado td { color: #999; text-decoration: line-through; }
 .proveedores { display: grid; gap: 6px; margin: 6px 0 12px; }
 .proveedores label { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--borde); border-radius: 4px; cursor: pointer; }
 .proveedores label:has(input:checked) { border-color: var(--azul); background: var(--azul-claro); }
+.tabla-form input { width: 100%; border: 1px solid transparent; padding: 3px 4px; background: transparent; }
+.tabla-form input:focus { border-color: var(--azul); background: #fff; outline: none; }
+.cargando { height: 4px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--azul), transparent); background-size: 50% 100%; background-repeat: no-repeat; animation: cargando 1.2s infinite linear; margin: 14px 0; }
+@keyframes cargando { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+.propuestas { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+.propuesta { border: 1px solid var(--borde); border-radius: 6px; padding: 8px 10px; background: #fff; }
+.propuesta.sin-permiso { opacity: .55; }
+.prop-cab { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.etiqueta { font-size: 11px; background: var(--azul-claro); color: var(--azul-oscuro); border-radius: 10px; padding: 1px 8px; }
+.prop-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 8px; margin-top: 6px; }
+.prop-campos label { font-size: 11px; color: var(--tenue); display: flex; flex-direction: column; }
+.prop-campos input { font-size: 12px; padding: 2px 4px; border: 1px solid var(--borde); border-radius: 3px; color: var(--texto); }

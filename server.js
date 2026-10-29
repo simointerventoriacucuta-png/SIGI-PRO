@@ -536,6 +536,87 @@ async function asistente(pid, b, u, ev) {
   }
 }
 
+// ---------- Lectura de documentos con IA ----------
+// Convierte el archivo en partes para Gemini: PDF e imágenes van tal cual; Excel, CSV, Word y texto, como texto
+async function partesDocumento(b) {
+  const mime = b.tipo_mime || '', nombre = String(b.nombre || ''), buf = Buffer.from(String(b.datos || ''), 'base64');
+  if (!buf.length) throw new Rechazo(400, 'El archivo está vacío');
+  if (/^application\/pdf$|^image\/(jpeg|png|webp)$/.test(mime)) return [{ inlineData: { mimeType: mime, data: buf.toString('base64') } }];
+  let texto;
+  if (/\.xlsx$/i.test(nombre) || /spreadsheetml/.test(mime)) {
+    const ExcelJS = require('exceljs'), libro = new ExcelJS.Workbook();
+    await libro.xlsx.load(buf);
+    const val = v => (v == null ? '' : typeof v === 'object' ? (v.result ?? v.text ?? (v.richText ? v.richText.map(t => t.text).join('') : v instanceof Date ? v.toISOString().slice(0, 10) : '')) : v);
+    texto = libro.worksheets.map(h => `### Hoja "${h.name}"\n` + h.getSheetValues().slice(1, 1500).filter(Boolean).map(f => f.slice(1).map(val).join(' | ')).join('\n')).join('\n\n');
+  } else if (/\.docx$/i.test(nombre) || /wordprocessingml/.test(mime)) {
+    const xml = new (require('pizzip'))(buf).file('word/document.xml').asText();
+    texto = xml.replace(/<\/w:p>/g, '\n').replace(/<w:tab\/>/g, '\t').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  } else if (/\.(csv|txt)$/i.test(nombre) || /^text\//.test(mime)) texto = buf.toString('utf8');
+  else throw new Rechazo(400, 'Formato no soportado: suba PDF, foto, Word (.docx), Excel (.xlsx), CSV o texto');
+  return [{ text: `Contenido del archivo "${nombre}":\n${texto.slice(0, 200000)}` }];
+}
+const INSTRUCCION_DOCUMENTO = `Eres un ingeniero de interventoría de obras viales en Colombia. Te entregan un documento del proyecto. Identifica qué es ("tipo") y extrae SOLO los datos que aparezcan en él, para registrarlos en el sistema de interventoría:
+- poliza: póliza de garantía (cumplimiento, anticipo, salarios, estabilidad, calidad, responsabilidad civil): un elemento por amparo.
+- oficio: carta, oficio, comunicación o correo recibido o enviado (radicado, remitente, destinatario, asunto, si requiere respuesta y en cuántos días).
+- ensayo: informe o resultados de laboratorio: un elemento por ensayo.
+- factura: factura, cuenta de cobro o soporte de gasto.
+- otrosi: otrosí, adición, prórroga, modificación o suspensión del contrato.
+- reunion: acta de reunión, socialización o comité.
+- presupuesto: cuadro de cantidades/presupuesto (ítems con código, descripción, unidad, cantidad y valor unitario).
+- personal: lista de personal (nombre, cargo, dedicación).
+- avance: apuntes, reporte o planilla de obra ejecutada en campo (qué se hizo, dónde y cuánto): un elemento por cada actividad ejecutada en "avances", con el código del ítem del presupuesto de obra que corresponda (de la lista que se te da; si no hay uno claro, déjalo vacío), abscisas como texto tal cual (p. ej. K0+120) y medidas en metros.
+- otro: cualquier otro documento.
+Además, en "vencimientos" lista toda obligación o fecha límite que el documento imponga (fecha AAAA-MM-DD y qué hay que hacer).
+Fechas AAAA-MM-DD. Valores en pesos como número sin puntos. Porcentajes como número. No inventes: deja vacío lo que no esté. En "resumen" explica en 1 o 2 frases qué es el documento y en "observaciones" lo que la interventoría debería revisar.`;
+const txtE = { type: 'string' }, numE = { type: 'number' };
+const ESQUEMA_DOCUMENTO = { type: 'object', required: ['tipo', 'resumen'], properties: {
+  tipo: { type: 'string', enum: ['poliza', 'oficio', 'ensayo', 'factura', 'otrosi', 'reunion', 'presupuesto', 'personal', 'avance', 'otro'] },
+  avances: { type: 'array', items: { type: 'object', properties: { fecha: txtE, codigo_item: txtE, actividad: txtE, frente: txtE, abscisa_inicial: txtE, abscisa_final: txtE, largo: numE, ancho: numE, espesor: numE, piezas: numE, cantidad: numE } } },
+  resumen: txtE, observaciones: txtE, contrato: { type: 'string', enum: ['Obra', 'Interventoría'], description: 'a qué contrato corresponde, si se sabe' },
+  poliza: { type: 'object', properties: { aseguradora: txtE, numero: txtE, tomador: txtE, asegurado: txtE,
+    amparos: { type: 'array', items: { type: 'object', properties: { amparo: txtE, porcentaje: numE, valor: numE, desde: txtE, hasta: txtE } } } } },
+  oficio: { type: 'object', properties: { fecha: txtE, sentido: { type: 'string', enum: ['Recibida', 'Enviada'] }, radicado: txtE, de: txtE, para: txtE, asunto: txtE, requiere_respuesta: { type: 'boolean' }, plazo_dias: numE } },
+  ensayos: { type: 'array', items: { type: 'object', properties: { fecha: txtE, ensayo: txtE, norma: txtE, item: txtE, abscisa: txtE, resultado: txtE, especificacion: txtE, cumple: { type: 'string', enum: ['Sí', 'No', 'Pendiente'] }, laboratorio: txtE } } },
+  factura: { type: 'object', properties: { fecha: txtE, proveedor: txtE, documento: txtE, descripcion: txtE, valor: numE } },
+  otrosi: { type: 'object', properties: { fecha: txtE, tipo: { type: 'string', enum: ['Adición', 'Prórroga', 'Adición y prórroga', 'Modificación', 'Suspensión'] }, valor: numE, dias: numE, objeto: txtE } },
+  reunion: { type: 'object', properties: { fecha: txtE, tipo: txtE, comunidad: txtE, descripcion: txtE, asistentes: numE } },
+  items: { type: 'array', items: { type: 'object', properties: { codigo: txtE, descripcion: txtE, unidad: txtE, cantidad: numE, vr_unitario: numE } } },
+  personas: { type: 'array', items: { type: 'object', properties: { nombre: txtE, cargo: txtE, dedicacion: numE } } },
+  vencimientos: { type: 'array', items: { type: 'object', properties: { fecha: txtE, descripcion: txtE, responsable: txtE } } },
+} };
+// Convierte lo que leyó la IA en registros propuestos para las tablas del programa
+async function propuestasDocumento(pid, d, nombre, u) {
+  const contratos = await db.all('SELECT id, tipo FROM contrato WHERE proyecto_id = ?', pid);
+  const cid = t => contratos.find(c => c.tipo === t)?.id;
+  const contratoDoc = d.contrato === 'Interventoría' ? 'interventoria' : 'obra';
+  const hoy = new Date().toISOString().slice(0, 10), out = [];
+  const add = (tabla, titulo, datos) => out.push({ tabla, titulo, datos, permitido: puede(u, tabla) });
+  if (d.tipo === 'poliza' && d.poliza) for (const a of d.poliza.amparos || [])
+    add('poliza', `Póliza ${d.poliza.numero || ''} · ${a.amparo || ''}`, { proyecto_id: pid, contrato: d.contrato || 'Obra', aseguradora: d.poliza.aseguradora, numero: d.poliza.numero, amparo: a.amparo, porcentaje: a.porcentaje, valor: a.valor, desde: a.desde, hasta: a.hasta, estado: a.hasta && a.hasta < hoy ? 'Vencida' : 'Vigente', notas: ['Leída con IA', d.poliza.tomador && 'Tomador: ' + d.poliza.tomador].filter(Boolean).join(' · ') });
+  if (d.tipo === 'oficio' && d.oficio) {
+    const o = d.oficio, f = o.fecha || hoy;
+    add('correspondencia', `Oficio ${o.radicado || ''}: ${o.asunto || ''}`, { proyecto_id: pid, fecha: f, sentido: o.sentido || 'Recibida', radicado: o.radicado, de: o.de, para: o.para, asunto: o.asunto, requiere_respuesta: o.requiere_respuesta ? 'Sí' : 'No', plazo: o.requiere_respuesta ? diasHabiles(f, o.plazo_dias || 15) : null, estado: 'Abierta', archivo: nombre });
+  }
+  if (d.tipo === 'ensayo') for (const e of d.ensayos || []) add('ensayo', `Ensayo ${e.ensayo || ''} ${e.abscisa || ''}`, { proyecto_id: pid, ...e });
+  if (d.tipo === 'factura' && d.factura && cid('interventoria')) add('gasto', `Gasto: ${d.factura.proveedor || ''} ${d.factura.documento || ''}`, { contrato_id: cid('interventoria'), ...d.factura, pagado: 'No' });
+  if (d.tipo === 'otrosi' && d.otrosi && cid(contratoDoc)) add('otrosi', `Otrosí (${d.otrosi.tipo || ''}) del contrato de ${contratoDoc === 'obra' ? 'obra' : 'interventoría'}`, { contrato_id: cid(contratoDoc), ...d.otrosi, estado: 'En trámite' });
+  if (d.tipo === 'reunion' && d.reunion) add('social', `Reunión: ${d.reunion.tipo || ''} ${d.reunion.comunidad || ''}`, { proyecto_id: pid, ...d.reunion, tipo: /vecindad/i.test(d.reunion.tipo || '') ? 'Acta de vecindad' : /social/i.test(d.reunion.tipo || '') ? 'Socialización' : 'Reunión de avance', estado: 'Cerrado' });
+  if (d.tipo === 'presupuesto' && cid(contratoDoc)) for (const it of (d.items || []).slice(0, 500)) add('item', `${it.codigo || ''} ${it.descripcion || ''}`, { contrato_id: cid(contratoDoc), tipo: it.unidad || it.cantidad ? 1 : 0, ...it });
+  if (d.tipo === 'personal') for (const p of d.personas || []) add('personal', `${p.nombre || ''} · ${p.cargo || ''}`, { proyecto_id: pid, ...p, estado: 'Propuesto' });
+  if (d.tipo === 'avance' && cid('obra')) {
+    const items = await db.all('SELECT id, codigo, descripcion, unidad FROM item WHERE contrato_id = ? AND tipo = 1', cid('obra'));
+    const norm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+    const metros = t => { const m = String(t ?? '').replace(',', '.').match(/k?\s*(\d+)\s*\+\s*([\d.]+)/i); return m ? +m[1] * 1000 + +m[2] : t === '' || t == null || Number.isNaN(Number(t)) ? null : Number(t); };
+    for (const a of d.avances || []) {
+      const it = items.find(i => a.codigo_item && norm(i.codigo) === norm(a.codigo_item)) || items.find(i => a.actividad && norm(i.descripcion).includes(norm(a.actividad).slice(0, 25)));
+      add('avance', `${a.fecha || hoy} · ${it ? (it.codigo || '') + ' ' + it.descripcion : '⚠️ elija el ítem: ' + (a.actividad || '')}`, { proyecto_id: pid, item_id: it?.id ?? null, fecha: a.fecha || hoy, frente: a.frente,
+        abs_ini: metros(a.abscisa_inicial), abs_fin: metros(a.abscisa_final), largo: a.largo, ancho: a.ancho, espesor: a.espesor, piezas: a.piezas, cantidad: a.cantidad, descripcion: a.actividad });
+    }
+  }
+  for (const v of d.vencimientos || []) if (v.fecha) add('vencimiento', `Vence ${v.fecha}: ${v.descripcion || ''}`, { proyecto_id: pid, fecha: v.fecha, tipo: { poliza: 'Póliza', oficio: 'Respuesta', otrosi: 'Contrato' }[d.tipo] || 'Documento', descripcion: v.descripcion, responsable: v.responsable, estado: 'Pendiente', fuente: nombre });
+  return out;
+}
+
 // Respuesta en tiempo real (Server-Sent Events). Los errores antes del primer evento salen como JSON.
 async function asistenteSSE(req, res, pid, u) {
   const b = await leerCuerpo(req);
@@ -713,6 +794,27 @@ async function api(req, res, url) {
     fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify(c));
     await auditar(u, 'asistente', null, 'configurar', null);
     return enviar(res, 200, { ok: true });
+  }
+  // Cualquier documento (PDF, foto, Word, Excel, CSV) → Gemini lo clasifica y propone los registros a crear (no guarda nada)
+  if (r0 === 'asistente' && r1 === 'documento' && req.method === 'POST') {
+    if (!u) throw new Rechazo(401, 'Elija un usuario para hacer cambios');
+    const b = await leerCuerpo(req);
+    const partes = await partesDocumento(b);
+    // Ítems del presupuesto de obra, para que la IA pueda reconocer apuntes de ejecución
+    const ob = await db.get("SELECT id FROM contrato WHERE proyecto_id = ? AND tipo = 'obra'", Number(r2_));
+    if (ob) partes.push({ text: 'Ítems del presupuesto de obra (código | descripción | unidad):\n' + (await db.all('SELECT codigo, descripcion, unidad FROM item WHERE contrato_id = ? AND tipo = 1 ORDER BY orden, id', ob.id)).map(i => `${i.codigo || ''} | ${i.descripcion} | ${i.unidad || ''}`).join('\n') });
+    let d;
+    try {
+      // 1) qué es el documento; 2) sus datos con el esquema de ese tipo (la lista de datos es obligatoria)
+      const cfg = configAsistente(), P = ESQUEMA_DOCUMENTO.properties;
+      d = await prov.leerDocumentoGemini(cfg, partes, INSTRUCCION_DOCUMENTO + '\n\nEn este paso responde solo tipo, resumen, observaciones y contrato.', { type: 'object', required: ['tipo', 'resumen'], properties: { tipo: P.tipo, resumen: P.resumen, observaciones: P.observaciones, contrato: P.contrato } });
+      const clave = { poliza: 'poliza', oficio: 'oficio', ensayo: 'ensayos', factura: 'factura', otrosi: 'otrosi', reunion: 'reunion', presupuesto: 'items', personal: 'personas', avance: 'avances' }[d.tipo];
+      const datos = await prov.leerDocumentoGemini(cfg, partes, INSTRUCCION_DOCUMENTO + `\n\nEl documento es de tipo "${d.tipo}". Extrae TODOS sus datos${clave ? ` en "${clave}" (todos los elementos, uno por fila o renglón)` : ''} y las fechas límite en "vencimientos".`,
+        { type: 'object', required: clave ? [clave] : [], properties: { ...(clave ? { [clave]: P[clave] } : {}), vencimientos: P.vencimientos } });
+      Object.assign(d, datos);
+    }
+    catch (e) { if (e instanceof prov.ErrorProveedor) throw new Rechazo(e.codigo, e.message); throw e; }
+    return enviar(res, 200, { tipo: d.tipo, resumen: d.resumen, observaciones: d.observaciones, propuestas: await propuestasDocumento(Number(r2_), d, b.nombre, u) });
   }
   if (r0 === 'asistente' && req.method === 'POST') return asistenteSSE(req, res, Number(r1), u);
   // ---------- Integraciones ----------
