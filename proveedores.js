@@ -120,4 +120,24 @@ async function turnoOllama(cfg, sistema, mensajes, herramientas, alTexto) {
   return { content, stop_reason: content.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn' };
 }
 
-module.exports = { turnoGemini, turnoOllama, ErrorProveedor, esquemaGemini };
+// ---------- Lectura de documentos con Gemini ----------
+// Envía el documento (PDF/foto en línea o su texto) y pide la respuesta en JSON con el esquema dado
+async function leerDocumentoGemini(cfg, partes, instruccion, esquema) {
+  if (!cfg.clave_gemini) throw new ErrorProveedor(400, 'Falta la clave de Gemini. El director la configura en Inicio → Asistente → Clave del asistente.');
+  const modelos = [...new Set([cfg.modelo_gemini || ALTERNOS[0], ...ALTERNOS])];
+  let ultimo;
+  for (const modelo of modelos) for (let intento = 0; intento < 2; intento++) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`, {
+      method: 'POST', signal: AbortSignal.timeout(180000), headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.clave_gemini },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [...partes, { text: instruccion }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: esquemaGemini(esquema) } }),
+    });
+    if (r.status === 429 || r.status === 503) { ultimo = new ErrorProveedor(r.status, 'Gemini está saturado en este momento: intente de nuevo en unos minutos.'); await espera(1500 * (intento + 1)); continue; }
+    if (!r.ok) { const t = await r.text(); throw new ErrorProveedor(r.status === 400 && /API key/i.test(t) || r.status === 403 ? 400 : 502, r.status === 403 || /API key/i.test(t) ? 'La clave de Gemini no es válida o no tiene acceso a la API' : 'Gemini no pudo leer el documento: ' + t.slice(0, 200)); }
+    const d = await r.json(), texto = (d.candidates?.[0]?.content?.parts || []).filter(p => p.text && !p.thought).map(p => p.text).join('');
+    try { return JSON.parse(texto); } catch { throw new ErrorProveedor(502, 'Gemini respondió en un formato inesperado; intente de nuevo.'); }
+  }
+  throw ultimo;
+}
+
+module.exports = { turnoGemini, turnoOllama, leerDocumentoGemini, ErrorProveedor, esquemaGemini };
