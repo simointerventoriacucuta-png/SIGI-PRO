@@ -164,6 +164,77 @@ async function docxActa(d) {
   return Packer.toBuffer(doc);
 }
 
+// Informe mensual de interventoría (datos de informeMensual en server.js)
+async function docxInforme(d) {
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, PageBreak } = docx;
+  const p = (texto, opc = {}) => new Paragraph({ spacing: { after: 120 }, alignment: opc.centro ? AlignmentType.CENTER : AlignmentType.LEFT, children: [new TextRun({ text: String(texto ?? ''), bold: !!opc.negrita, size: opc.size || 20 })] });
+  const h = texto => new Paragraph({ heading: HeadingLevel.HEADING_1, spacing: { before: 240, after: 120 }, children: [new TextRun(texto)] });
+  const h2 = texto => new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 160, after: 80 }, children: [new TextRun(texto)] });
+  const celda = (texto, negrita) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(texto ?? ''), bold: !!negrita, size: 16 })] })] });
+  const tabla = (enc, filas, vacio) => (filas.length
+    ? new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [new TableRow({ tableHeader: true, children: enc.map(e => celda(e, true)) }), ...filas.map(f => new TableRow({ children: f.map(x => celda(x)) }))] })
+    : p(vacio || 'Sin registros en el periodo.'));
+  const pct = v => (v == null ? '—' : cant(v) + ' %'), nombre = { obra: 'Contrato de obra', interventoria: 'Contrato de interventoría' };
+  const pr = d.proyecto || {}, cs = d.contratos, f = d.fisico, i = d.sst_ind;
+  const cuerpo = [
+    p(''), p(''), p('INFORME MENSUAL DE INTERVENTORÍA', { centro: true, negrita: true, size: 36 }),
+    p(pr.nombre || '', { centro: true, negrita: true, size: 28 }), p(pr.entidad || '', { centro: true }), p(pr.ubicacion || '', { centro: true }),
+    p(''), ...cs.map(c => p(`${nombre[c.tipo] || c.tipo} N.º ${c.numero || '—'} · ${c.contratista || ''}`, { centro: true })),
+    p(''), p(`Periodo: ${d.ini} a ${d.fin}`, { centro: true, negrita: true }), p(`Fecha de generación: ${d.hoy}`, { centro: true }),
+    new Paragraph({ children: [new PageBreak()] }),
+
+    h('1. Datos de los contratos'),
+    ...(cs.length ? cs.flatMap(c => [h2(nombre[c.tipo] || c.tipo), tabla(['Concepto', 'Valor'], [
+      ['Número', c.numero || '—'], ['Contratista', `${c.contratista || ''} ${c.nit ? 'NIT ' + c.nit : ''}`], ['Objeto', c.objeto || '—'],
+      ['Valor original', pesos(c.valor)], ['Adiciones (otrosíes firmados)', pesos(c.adiciones)], ['Valor vigente', `${pesos(c.valor_vigente)} (${enLetras(c.valor_vigente)})`],
+      ['Plazo', c.plazo || '—'], ['Prórrogas', `${c.prorroga_dias || 0} días`], ['Inicio', c.fecha_inicio || '—'], ['Terminación original', c.fecha_fin || '—'],
+      ['Terminación vigente', c.fecha_fin_vigente || '—'], ['Estado', c.estado || '—']])]) : [p('No hay contratos registrados.')]),
+
+    h('2. Avance financiero'),
+    ...cs.flatMap(c => [h2(nombre[c.tipo] || c.tipo),
+      tabla(['Acta', 'Periodo', 'Fecha', 'Estado', 'Valor', 'Acumulado'], c.actas_mes.map(a => [a.numero, `${a.desde || '—'} a ${a.hasta || '—'}`, a.fecha || '—', a.estado, pesos(a.valor), pesos(a.acumulado)]), 'Sin actas en el periodo.'),
+      p(`Acumulado al cierre del periodo: ${pesos(c.acumulado_mes)} de ${pesos(c.valor_vigente)} vigente (${pct(c.pct)}).`),
+      p(`Saldo por ejecutar: ${pesos((c.valor_vigente || 0) - (c.acumulado_mes || 0))} (${enLetras(Math.max(0, (c.valor_vigente || 0) - (c.acumulado_mes || 0)))}).`)]),
+
+    h('3. Avance físico'),
+    p(`Corte: ${f.hoy}. Programado: ${pct(f.programado)}. Ejecutado: ${pct(f.real)}. SPI: ${f.spi ?? '—'}${f.spi == null ? '' : f.spi >= 1 ? ' (al día o adelantado)' : ' (atrasado)'}.`),
+    tabla(['WBS', 'Actividad', 'Inicio', 'Fin', 'Programado', 'Ejecutado'], f.tareas.filter(t => !t.resumen).map(t => [t.wbs || '', t.nombre, t.inicio || '', t.fin || '', pct(t.programado), pct(t.avance_real || 0)]), 'No hay programa de obra cargado.'),
+    h2('Tramos'),
+    tabla(['Tramo', 'Abscisa inicial', 'Abscisa final', 'Actividad', 'Avance', 'Fecha'], d.tramos.map(t => [t.nombre || '', t.abs_ini ?? '', t.abs_fin ?? '', t.actividad || '', pct(t.avance || 0), t.fecha || '']), 'No hay tramos registrados.'),
+
+    h('4. Otrosíes'),
+    tabla(['Contrato', 'N.º', 'Fecha', 'Tipo', 'Valor', 'Días', 'Estado', 'Objeto'], cs.flatMap(c => c.otrosis.map(o => [c.tipo, o.numero ?? '', o.fecha || '', o.tipo || '', pesos(o.valor), o.dias || 0, o.estado || '', o.objeto || ''])), 'No hay otrosíes registrados.'),
+
+    h('5. Pólizas'),
+    tabla(['Contrato', 'Aseguradora', 'N.º', 'Amparo', 'Valor', 'Desde', 'Hasta', 'Vigencia'], d.polizas.map(x => [x.contrato || '', x.aseguradora || '', x.numero || '', x.amparo || '', pesos(x.valor), x.desde || '', x.hasta || '',
+      !x.hasta ? 'Sin fecha' : x.hasta < d.hoy ? 'VENCIDA' : x.hasta <= d.fin ? 'Vence en el periodo' : 'Vigente']), 'No hay pólizas registradas.'),
+
+    h('6. Seguridad y salud en el trabajo'),
+    i ? tabla(['Trabajadores', 'Frecuencia AT', 'Severidad AT', 'Mortalidad AT', 'Ausentismo', 'Planillas PILA/ARL'], [[i.trabajadores, pct(i.frecuencia), pct(i.severidad), pct(i.mortalidad), pct(i.ausentismo), i.planillas_ok || '']]) : p('Sin indicadores SST registrados para el mes.'),
+    h2('Eventos del mes'),
+    tabla(['Fecha', 'Tipo', 'Frente', 'Descripción', 'Hallazgo', 'Acción', 'Estado'], d.sst.map(x => [x.fecha, x.tipo || '', x.frente || '', x.descripcion || '', x.hallazgo || '', x.accion || '', x.estado || ''])),
+
+    h('7. Gestión ambiental y PMT'),
+    tabla(['Fecha', 'Programa', 'Ficha', 'Actividad', 'Meta / logro', 'Hallazgo', 'Estado'], d.ambiental.map(x => [x.fecha, x.programa || '', x.ficha || '', x.actividad || '', `${x.meta ?? '—'} / ${x.logro ?? '—'}`, x.hallazgo || '', x.estado || ''])),
+    h2('Planes de manejo de tránsito vigentes en el mes'),
+    tabla(['Frente', 'Abscisas', 'Cierre', 'Radicado', 'Vigencia', 'Cumple', 'Estado'], d.pmt.map(x => [x.frente || '', `${x.abs_ini || ''} – ${x.abs_fin || ''}`, x.cierre || '', x.radicado || '', `${x.desde || '—'} a ${x.hasta || '—'}`, x.cumple || '', x.estado || '']), 'No hay PMT vigentes en el periodo.'),
+
+    h('8. Gestión social y PQRS'),
+    tabla(['Fecha', 'Tipo', 'Comunidad', 'Descripción', 'Asistentes', 'Estado'], d.social.map(x => [x.fecha, x.tipo || '', x.comunidad || '', x.descripcion || '', x.asistentes ?? '', x.estado || ''])),
+    p(`PQRS abiertas: ${d.pqrs_abiertas.length}. Vencidas: ${d.pqrs_vencidas.length}.`, { negrita: true }),
+    tabla(['Fecha', 'Peticionario', 'Descripción', 'Plazo', 'Estado'], d.pqrs_abiertas.map(x => [x.fecha || '', x.comunidad || '', x.descripcion || '', (x.plazo || '') + (d.pqrs_vencidas.includes(x) ? ' (VENCIDA)' : ''), x.estado || '']), 'No hay PQRS abiertas.'),
+
+    h('9. Vencimientos y pendientes'),
+    tabla(['Fecha', 'Tipo', 'Descripción', 'Responsable', 'Estado'], d.vencimientos.map(x => [(x.fecha || '') + (x.fecha && x.fecha < d.hoy ? ' (vencido)' : ''), x.tipo || '', x.descripcion || '', x.responsable || '', x.estado || '']), 'No hay pendientes.'),
+
+    h('10. Conclusiones y recomendaciones'),
+    ...Array(6).fill(0).map(() => p('______________________________________________________________________________')),
+    p(''), p(''), p(''),
+    p('______________________________', { centro: true }), p(d.director, { centro: true, negrita: true }), p('Director de interventoría', { centro: true }),
+  ];
+  return Packer.toBuffer(new Document({ sections: [{ children: cuerpo }] }));
+}
+
 // ---------- Microsoft Project (XML: Archivo → Guardar como → XML) ----------
 function etiqueta(xml, nombre) { const m = xml.match(new RegExp(`<${nombre}>([\\s\\S]*?)</${nombre}>`)); return m ? m[1].trim() : null; }
 const desXml = s => (s == null ? s : s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&'));
@@ -239,4 +310,4 @@ function csv(filas) {
   return '﻿' + [cols.join(','), ...filas.map(f => cols.map(c => esc(f[c])).join(','))].join('\r\n');
 }
 
-module.exports = { xlsxPresupuesto, xlsxActa, leerPresupuestoXlsx, docxActa, enLetras, leerProject, programado, xmlProject, leerLandXML, csv };
+module.exports = { xlsxPresupuesto, xlsxActa, leerPresupuestoXlsx, docxActa, docxInforme, enLetras, pesos, leerProject, programado, xmlProject, leerLandXML, csv };

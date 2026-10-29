@@ -110,7 +110,7 @@ const CINTA = {
   ]],
   informes: ['Informes', [
     ['Obra', [['Balance de obra', 'balance', ab('obra', 'balance')], ['Mayores y menores cantidades', 'mayores', ab('obra', 'mayores')]]],
-    ['Interventoría', [['Control de costos y utilidad', 'costos', ab('interventoria', 'costos')], ['Informe mensual (próximamente)', 'informe', null, () => false]]],
+    ['Interventoría', [['Control de costos y utilidad', 'costos', ab('interventoria', 'costos')], ['Informe mensual', 'informe', informeMensual]]],
     ['Power BI', [['Gráficos y datos para Power BI', 'balance', () => abrir('graficos')]]],
   ]],
 };
@@ -668,6 +668,11 @@ document.addEventListener('click', e => { if (!e.target.closest('#panel-avisos')
 async function aprobarTodo() {
   if (!confirm('¿Copiar las cantidades presentadas como aprobadas en todos los ítems de esta acta?')) return;
   await api(`acta/${E.activo.split(':')[1]}/aprobar-todo`, 'POST'); await refrescar(); aviso('Cantidades aprobadas');
+}
+function informeMensual() {
+  const mes = prompt('Mes del informe (AAAA-MM):', new Date().toISOString().slice(0, 7)); if (!mes) return;
+  if (!/^\d{4}-\d{2}$/.test(mes.trim())) return alert('Formato de mes no válido: use AAAA-MM');
+  location.href = `/api/docx/informe/${E.pid}?mes=${mes.trim()}`;
 }
 function exportarActa() { location.href = `/api/xlsx/acta/${E.activo.split(':')[1]}`; }
 
