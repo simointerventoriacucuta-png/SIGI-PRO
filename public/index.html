@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SIGI · Gestión de Interventoría</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <header class="barra-titulo">
+    <div class="logo">SI</div>
+    <label class="selector">Proyecto:
+      <select id="sel-proyecto"></select>
+    </label>
+    <div class="titulo">SIGI · Sistema Integral de Gestión de Interventoría</div>
+    <div class="fecha" id="hoy"></div>
+  </header>
+
+  <nav class="cinta">
+    <div class="pestanas-cinta" id="pestanas-cinta"></div>
+    <div class="grupos-cinta" id="grupos-cinta"></div>
+  </nav>
+
+  <main class="area">
+    <aside class="explorador">
+      <div class="panel-titulo">Explorador del proyecto</div>
+      <div id="arbol" class="arbol"></div>
+    </aside>
+
+    <section class="documentos">
+      <div class="pestanas-doc" id="pestanas-doc"></div>
+      <div class="contenido-doc" id="contenido-doc"></div>
+    </section>
+
+    <aside class="lateral" id="lateral">
+      <div class="lateral-pestanas">
+        <button data-panel="pendientes" class="activo">Pendientes</button>
+        <button data-panel="memoria">Memoria</button>
+      </div>
+      <div class="lateral-cuerpo" id="lateral-cuerpo"></div>
+    </aside>
+  </main>
+
+  <footer class="barra-estado">
+    <span id="estado-version">SIGI 0.1</span>
+    <span id="estado-proyecto"></span>
+    <span id="estado-mensaje" class="mensaje"></span>
+    <span class="zoom">Zoom <input type="range" id="zoom" min="80" max="130" value="100"></span>
+  </footer>
+
+  <dialog id="dialogo"><form method="dialog" id="dialogo-form"></form></dialog>
+  <script src="app.js"></script>
+</body>
+</html>
