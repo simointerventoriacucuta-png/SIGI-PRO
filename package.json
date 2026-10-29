@@ -1,7 +1,7 @@
 {
     "name": "sigi",
     "productName": "SIGI Pro",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Sistema Integral de GestiÃƒÂ³n de InterventorÃƒÂ­a",
     "main": "main.js",
     "scripts": {
@@ -30,7 +30,10 @@
         "nsis": {
             "oneClick": false,
             "allowToChangeInstallationDirectory": true,
-            "shortcutName": "SIGI Pro"
+            "shortcutName": "SIGI Pro",
+            "createDesktopShortcut": "always",
+            "createStartMenuShortcut": true,
+            "artifactName": "SIGI-Pro-Instalador-${version}.${ext}"
         }
     },
     "devDependencies": {
