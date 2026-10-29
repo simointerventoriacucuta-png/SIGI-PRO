@@ -1134,9 +1134,16 @@ function enviar(res, codigo, cuerpo, tipo = 'application/json; charset=utf-8') {
   res.writeHead(codigo, { 'Content-Type': tipo, 'Cache-Control': 'no-store' });
   res.end(typeof cuerpo === 'string' || Buffer.isBuffer(cuerpo) ? cuerpo : JSON.stringify(cuerpo));
 }
+// Tamaño máximo del cuerpo: 5 MB en general; 30 MB donde llega un archivo en base64 (20 MB de archivo ≈ 27 MB en base64)
+const MAX_CUERPO = 5 * 1024 * 1024, MAX_ARCHIVO = 30 * 1024 * 1024;
+const RUTAS_ARCHIVO = /^\/api\/(adjunto|asistente\/documento|xlsx\/importar)(\/|$)/;
 function leerCuerpo(req) {
+  const MAX = RUTAS_ARCHIVO.test(req.url.split('?')[0]) ? MAX_ARCHIVO : MAX_CUERPO;
   return new Promise((ok, mal) => {
-    let s = ''; req.on('data', d => (s += d)); req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { mal(e); } });
+    const trozos = []; let n = 0, excedido = false;
+    req.on('data', d => { if (excedido) return; n += d.length; if (n > MAX) { excedido = true; trozos.length = 0; return mal(new Rechazo(413, 'La petición es demasiado grande')); } trozos.push(d); });
+    req.on('end', () => { if (excedido) return; const s = Buffer.concat(trozos).toString('utf8'); try { ok(s ? JSON.parse(s) : {}); } catch { mal(new Rechazo(400, 'El cuerpo de la petición no es JSON válido')); } });
+    req.on('error', mal);
   });
 }
 function limpiar(tabla, datos) {
@@ -1303,8 +1310,13 @@ async function api(req, res, url) {
   if (r0 === 'adjunto' && r2_ === 'archivo') {
     const a = await db.get('SELECT * FROM adjunto WHERE id = ?', Number(r1)), d = await db.get('SELECT datos FROM adjunto_dato WHERE adjunto_id = ?', Number(r1));
     if (!a || !d) return enviar(res, 404, { error: 'No existe' });
-    res.setHeader('Content-Disposition', `${q.descargar ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(a.nombre || 'archivo')}`);
-    return enviar(res, 200, Buffer.from(d.datos), a.tipo_mime || 'application/octet-stream');
+    // Solo se muestran en la app los tipos inofensivos; lo demás (HTML, SVG, XML...) se descarga, para que un adjunto
+    // no pueda ejecutar código con el origen de la app (XSS almacenado). Además nosniff y CSP sandbox.
+    const mime = String(a.tipo_mime || ''), seguro = /^(image\/(jpeg|png|gif|webp|bmp)|application\/pdf|text\/plain|video\/(mp4|webm)|audio\/[\w.+-]+)$/i.test(mime);
+    res.setHeader('Content-Disposition', `${q.descargar || !seguro ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(a.nombre || 'archivo')}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (!/^application\/pdf$/i.test(mime)) res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self'; media-src 'self'");
+    return enviar(res, 200, Buffer.from(d.datos), seguro ? mime : 'application/octet-stream');
   }
   if (r0 === 'adjunto' && req.method === 'POST') {
     const b = await leerCuerpo(req);
@@ -1314,6 +1326,8 @@ async function api(req, res, url) {
     const datos = Buffer.from(String(b.datos || ''), 'base64');
     if (!datos.length) throw new Rechazo(400, 'El archivo está vacío');
     if (datos.length > 20 * 1024 * 1024) throw new Rechazo(400, 'El archivo pasa de 20 MB');
+    if (b.tipo_mime && !/^[\w.+-]+\/[\w.+-]+$/.test(String(b.tipo_mime))) throw new Rechazo(400, 'Tipo de archivo inválido');
+    if (!Number.isInteger(Number(b.proyecto_id)) || !(await db.get('SELECT id FROM proyecto WHERE id = ?', Number(b.proyecto_id)))) throw new Rechazo(400, 'Proyecto inexistente');
     const r = await db.run(`INSERT INTO adjunto (proyecto_id, tabla, registro_id, categoria, nombre, tipo_mime, tamano, fecha, frente, abscisa, punto, descripcion, lat, lon, usuario, creado)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, Number(b.proyecto_id), b.tabla || 'proyecto', b.registro_id ? Number(b.registro_id) : null,
       b.categoria || (/^image\//.test(b.tipo_mime) ? 'Foto' : 'Documento'), b.nombre, b.tipo_mime, datos.length, b.fecha || new Date().toISOString().slice(0, 10),
@@ -1363,7 +1377,7 @@ async function api(req, res, url) {
   }
   if (r0 === 'sync' && r1 === 'probar') { const b = await leerCuerpo(req); return enviar(res, 200, await Base.probar(b.url, b.token)); }
   if (r0 === 'sync' && r1 === 'activar') { const b = await leerCuerpo(req); const r = await db.activarNube(b.url, b.token, ESQUEMA); await iniciar(); await auditar(u, 'sync', null, 'activar', { url: b.url }); return enviar(res, 200, r); }
-  if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); return enviar(res, 200, { ok: true }); }
+  if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); await auditar(u, 'sync', null, 'desactivar', null); return enviar(res, 200, { ok: true }); }
   if (r0 === 'sync' && r1 === 'ahora') { await db.sincronizar(); return enviar(res, 200, db.estado); }
 
   if (r0 === 'resumen') return enviar(res, 200, await resumen(Number(r1)));
@@ -1457,7 +1471,7 @@ async function api(req, res, url) {
   }
 
   // API genérica: /api/t/:tabla[/:id]
-  if (r0 === 't' && r1 in TABLAS) {
+  if (r0 === 't' && Object.hasOwn(TABLAS, r1)) {
     const tabla = r1, id = r2_ ? Number(r2_) : null, padre = TABLAS[tabla];
     if (req.method === 'GET') {
       if (id) return enviar(res, 200, (await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id)) || null);
@@ -1474,18 +1488,20 @@ async function api(req, res, url) {
       if (tabla === 'requisicion_item') await rqEditable(d.requisicion_id);
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (tabla === 'social' && d.tipo === 'PQRS' && !d.plazo) d.plazo = diasHabiles(d.fecha || new Date().toISOString().slice(0, 10), 15);
-      if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
-      if (tabla === 'suspension' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM suspension WHERE contrato_id = ?', d.contrato_id)).m;
-      if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'avance') await prepararAvance(d, u);
       calcularSST(tabla, d);
+      // Consecutivo de actas/otrosíes/suspensiones calculado dentro del mismo INSERT (atómico): evita números repetidos
+      // cuando dos usuarios crean a la vez y la base está en la nube (entre SELECT e INSERT hay espera de red)
+      const auto = ['otrosi', 'acta', 'suspension'].includes(tabla) && d.numero == null;
       const k = Object.keys(d);
-      const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
+      const r = auto
+        ? await db.run(`INSERT INTO ${tabla} (${[...k, 'numero'].join(',')}) VALUES (${k.map(() => '?').join(',')}${k.length ? ',' : ''}(SELECT COALESCE(MAX(numero), 0) + 1 FROM ${tabla} WHERE contrato_id = ?))`, ...Object.values(d), d.contrato_id ?? null)
+        : await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
       if (tabla === 'avance') await vincularAvance(r.id);
       // Un acta nueva recoge las capturas de avance pendientes de su periodo
       if (tabla === 'acta') for (const a of await db.all('SELECT id FROM avance WHERE contrato_id = ? AND acta_id IS NULL AND estado <> ? AND fecha >= COALESCE(?, fecha) AND fecha <= COALESCE(?, fecha)', d.contrato_id, 'Rechazado', d.desde ?? null, d.hasta ?? null)) await vincularAvance(a.id);
       const nuevo = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, r.id);
-      await auditar(u, tabla, r.id, 'crear', d);
+      await auditar(u, tabla, r.id, 'crear', auto ? { ...d, numero: nuevo?.numero } : d);
       return enviar(res, 200, nuevo);
     }
     if (req.method === 'PUT' && id) {
@@ -1523,12 +1539,17 @@ async function api(req, res, url) {
   enviar(res, 404, { error: 'Ruta no encontrada' });
 }
 
+// Defensa contra DNS rebinding: solo se atienden peticiones dirigidas a este equipo por su nombre local
+const HOST_LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const PUBLICO = path.join(RAIZ, 'public');
 const servidor = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost');
+  if (!HOST_LOCAL.test(req.headers.host || '')) return enviar(res, 403, { error: 'Host no permitido' });
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { return enviar(res, 400, { error: 'URL inválida' }); }
   try {
     if (url.pathname.startsWith('/api/')) return await api(req, res, url);
-    const archivo = path.normalize(path.join(RAIZ, 'public', url.pathname === '/' ? 'index.html' : url.pathname));
-    if (!archivo.startsWith(path.join(RAIZ, 'public')) || !fs.existsSync(archivo)) return enviar(res, 404, 'No encontrado', 'text/plain');
+    const archivo = path.normalize(path.join(PUBLICO, url.pathname === '/' ? 'index.html' : url.pathname));
+    if (!archivo.startsWith(PUBLICO + path.sep) || !fs.existsSync(archivo) || !fs.statSync(archivo).isFile()) return enviar(res, 404, 'No encontrado', 'text/plain');
     enviar(res, 200, fs.readFileSync(archivo), TIPOS[path.extname(archivo)] || 'application/octet-stream');
   } catch (e) {
     if (e instanceof Rechazo) return enviar(res, e.codigo, { error: e.message });
@@ -1537,6 +1558,8 @@ const servidor = http.createServer(async (req, res) => {
     enviar(res, 500, { error: sinRed ? 'Sin conexión con la nube: puede consultar, pero los cambios no se guardaron. Revise el internet.' : e.message });
   }
 });
+// Un error asíncrono suelto no debe tumbar el servidor (la app de escritorio depende de él)
+process.on('unhandledRejection', e => console.error('Promesa rechazada sin capturar:', e));
 // Al arrancar desde la app de escritorio (main.js) se usa un puerto libre que se lee de aquí
 module.exports = iniciar().then(() => correo.programar()).then(() => new Promise((ok, mal) => {
   const listo = () => { const p = servidor.address().port; console.log(`SIGI listo en http://localhost:${p} (base: ${db.estado.modo})`); ok(p); };
