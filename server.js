@@ -93,7 +93,7 @@ async function iniciar() {
   await db.exec(ESQUEMA);
   if (!(await db.all('PRAGMA table_info(usuario)')).some(c => c.name === 'correo')) await db.run('ALTER TABLE usuario ADD COLUMN correo TEXT');
   const colItem = (await db.all('PRAGMA table_info(item)')).map(c => c.name);
-  for (const [c, t] of [['otrosi_id', 'INTEGER'], ['apu', 'TEXT']]) if (!colItem.includes(c)) await db.run(`ALTER TABLE item ADD COLUMN ${c} ${t}`);
+  for (const [c, t] of [['otrosi_id', 'INTEGER'], ['apu', 'TEXT'], ['justificacion', 'TEXT']]) if (!colItem.includes(c)) await db.run(`ALTER TABLE item ADD COLUMN ${c} ${t}`);
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
   // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)
@@ -863,6 +863,23 @@ async function api(req, res, url) {
     await auditar(u, 'acta_item', r1, 'aprobar-todo', null);
     await db.run('UPDATE acta_item SET cant_aprobada = cant_presentada WHERE acta_id = ?', Number(r1));
     return enviar(res, 200, { ok: true });
+  }
+
+  // Copiar las cantidades aprobadas del acta anterior a los ítems que en esta acta aún están en cero
+  if (r0 === 'acta' && r2_ === 'copiar-anterior' && req.method === 'POST') {
+    exigir(u, 'acta_item'); const a = await actaEditable(Number(r1));
+    const ant = await db.get('SELECT id, numero FROM acta WHERE contrato_id = ? AND numero < ? ORDER BY numero DESC LIMIT 1', a.contrato_id, a.numero);
+    if (!ant) throw new Rechazo(409, 'No hay un acta anterior de la cual copiar');
+    const ya = new Set((await db.all('SELECT item_id FROM acta_item WHERE acta_id = ? AND (cant_presentada <> 0 OR cant_aprobada <> 0)', a.id)).map(r => r.item_id));
+    let n = 0;
+    for (const r of await db.all('SELECT item_id, cant_aprobada FROM acta_item WHERE acta_id = ? AND cant_aprobada <> 0', ant.id)) {
+      if (ya.has(r.item_id)) continue;
+      await db.run(`INSERT INTO acta_item (acta_id, item_id, cant_presentada, cant_aprobada) VALUES (?, ?, ?, ?)
+        ON CONFLICT (acta_id, item_id) DO UPDATE SET cant_presentada = excluded.cant_presentada, cant_aprobada = excluded.cant_aprobada`, a.id, r.item_id, r.cant_aprobada, r.cant_aprobada);
+      n++;
+    }
+    await auditar(u, 'acta_item', r1, 'copiar-anterior', { desde_acta: ant.numero, items: n });
+    return enviar(res, 200, { ok: true, items: n, desde: ant.numero });
   }
 
   // Pegar filas desde Excel: [{codigo, descripcion, unidad, cantidad, vr_unitario}] — una fila sin unidad ni cantidad es capítulo

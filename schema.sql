@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS item (
   sin_aiu INTEGER DEFAULT 0,      -- 1 = va por fuera del AIU (PMT, PMA...)
   orden INTEGER DEFAULT 0,
   otrosi_id INTEGER,              -- ítem no previsto: otrosí que lo aprobó
-  apu TEXT                        -- análisis de precio unitario (JSON)
+  apu TEXT,                       -- análisis de precio unitario (JSON)
+  justificacion TEXT              -- justificación técnica de mayores/menores cantidades
 );
 
 -- Actas parciales (equivalen a las "estimaciones")
