@@ -29,16 +29,20 @@ Leyenda: ● completo · ◐ parcial · ○ no tiene · ? sin información públ
 | Ítems no previstos con APU | ○ | ● | ● | ● | ● | ◐ | ◐ | ○ |
 | Anticipo, amortización y retenciones | ○ | ● | ● | ● | ● | ◐ | ◐ | ○ |
 | Contrato propio de interventoría (costos y margen) | ● | ○ | ○ | ◐ | ● | ○ | ○ | ○ |
-| Programa de obra y curva S | ◐ | ● | ● | ● | ● | ● | ● | ◐ |
+| Programa de obra y curva S | ● (Project) | ● | ● | ● | ● | ● | ● | ◐ |
 | Bitácora diaria, ensayos y correspondencia | ● | ○ | ○ | ○ | ◐ | ● | ● | ● |
-| Fotos y avance en campo desde el celular | ◐ | ○ | ○ | ◐ | ◐ | ● | ● | ● |
-| Avance sobre plano o alineamiento (abscisas) | ◐ | ○ | ○ | ○ | ○ | ● (planos) | ● (BIM) | ● (planos) |
+| Fotos y avance en campo desde el celular | ● (captura con fotos y GPS) | ○ | ○ | ◐ | ◐ | ● | ● | ● |
+| Avance sobre plano o alineamiento (abscisas) | ● (LandXML) | ○ | ○ | ○ | ○ | ● (planos) | ● (BIM) | ● (planos) |
 | RFI, consultas y solicitudes con plazo de respuesta | ○ | ○ | ○ | ○ | ◐ | ● | ● | ● |
+| **Requisiciones (RQ) con aprobación** | ● (nuevo) | ● (con explosión de insumos, OC y almacén) | ● | ◐ | ● | ◐ (*commitments*) | ◐ | ○ |
 | **Lista de chequeo documental por acta** | ● (nuevo) | ○ | ○ | ○ | ◐ | ● | ● | ● |
 | Control del expediente en SECOP II | ◐ (referencia por requisito) | ○ | ○ | ○ | ? | ○ | ○ | ○ |
 | Usuarios, roles y auditoría | ● | ◐ | ◐ | ● | ● | ● | ● | ● |
 | Trabajo sin internet y sincronización | ● (libSQL / Turso) | ● (local) | ● (local) | ● | ○ | ◐ | ◐ | ● |
-| Tableros y asistente de IA | ◐ | ○ | ○ | ◐ | ◐ | ● | ● | ◐ |
+| SST, ambiental (PAGA), PMT y social (PQRS) | ● | ○ | ○ | ○ | ◐ | ● (seguridad) | ● | ◐ |
+| Suspensiones y liquidación con plazos legales | ● | ◐ | ◐ | ○ | ◐ | ○ | ○ | ○ |
+| Informe mensual en Word | ● | ◐ | ◐ | ◐ | ◐ | ● | ● | ◐ |
+| Tableros (Power BI) y asistente de IA | ● | ○ | ○ | ◐ | ◐ | ● | ● | ◐ |
 
 ## 3. Qué piden las entidades y cómo queda SIGI Pro
 
@@ -57,6 +61,8 @@ Esfuerzo: S = menos de un día · M = 2 a 5 días · L = más de una semana.
 | 2 | Listas de chequeo para el acta de inicio y la liquidación, con plantillas que el director pueda editar | Completa el punto 9 | S |
 | 3 | Adjuntar el archivo de soporte a cada requisito, además de la referencia | Hoy solo se guardan el radicado o el enlace | S–M |
 | 4 | Registro del expediente en SECOP II: documento, fecha de publicación, plazo legal y alerta si está vencido | Obligación del interventor, y ningún programa comparado la tiene | M |
+| 4b | ✅ **Requisiciones (RQ)** de la interventoría, con aprobación del director y gasto automático (hecha en esta rama, a pedido del usuario) | El equipo pide recursos (laboratorio, topografía, papelería) y hoy no queda rastro de quién aprobó | M |
+| 4c | RQ desde la explosión de insumos del presupuesto y orden de compra a proveedor | Así lo hace OPUS. En interventoría pesa menos, porque no hay APU. Depende del punto 6 | L |
 | 5 | Anticipo, amortización y retenciones por acta | Los tienen OPUS, Neodata, Presto y SINCO | M |
 | 6 | Ítems no previstos con APU y comparativo de precios | Es el punto débil frente a OPUS y Neodata | L |
 | 7 | Consultas y solicitudes del contratista (tipo RFI), con plazo de respuesta y semáforo | Es la función central de Procore, ACC y Fieldwire | M |
@@ -64,7 +70,24 @@ Esfuerzo: S = menos de un día · M = 2 a 5 días · L = más de una semana.
 | 9 | App de campo sin conexión para el celular | Es la fortaleza de Fieldwire y Procore | L |
 | 10 | Matriz de obligaciones contractuales, para el seguimiento jurídico que pide CCE | La guía de CCE pide seguimiento jurídico, además del técnico y el financiero | M |
 
-## 5. Mejora implementada: la lista de chequeo documental del acta
+## 5. OPUS y las requisiciones (RQ)
+
+En OPUS, el flujo de compras sale del presupuesto. La **explosión de insumos** suma los materiales, la mano de obra y los equipos de los APU. Con eso, el usuario arma la **requisición**, que tiene número consecutivo, obra, frente, solicitante, insumos y cantidades, y se valida contra lo presupuestado y lo ya pedido. Después la **autoriza** quien tenga permiso. De la RQ autorizada salen la **orden de compra** al proveedor, con cotizaciones comparadas, la **entrada al almacén** y la **salida a obra**, que se cargan al costo real. La hoja de ruta descartaba bodega, requisiciones y explosión de insumos porque son cosas del contratista. Aun así, la interventoría tiene sus propios pedidos: ensayos de laboratorio, topografía, vehículos, papelería y dotación SST. Ahí sí sirve una RQ sencilla con aprobación.
+
+Fuente sobre OPUS: los manuales M1 a M4 citados en la hoja de ruta y la descripción general del producto ([comparativo de OneEstimate](https://oneestimate.ai/es/blog/software-presupuestos-construccion-comparativa)). No encontré en internet documentación pública del módulo de compras de Ecosoft, así que el flujo exacto hay que confirmarlo con el proveedor.
+
+**Cómo quedó en SIGI Pro** (cinta "Contrato de interventoría" → Requisiciones, y en el árbol):
+
+- La RQ tiene número consecutivo por proyecto, fecha, contrato (obra o interventoría), solicitante (por defecto, el usuario), frente y justificación.
+- Cada ítem lleva descripción, unidad, cantidad, valor unitario estimado y, si se quiere, el ítem del presupuesto. Al elegir el ítem se llenan la descripción, la unidad y el precio.
+- Estados: Borrador → Solicitada → Aprobada o Rechazada → Atendida. Solo el director aprueba o rechaza, y el rechazo exige un motivo. Atienden el director o el administrativo, y solo el director devuelve una RQ que ya estaba aprobada.
+- No se puede solicitar una RQ sin ítems, y una RQ aprobada ya no se edita.
+- Al atender una RQ del contrato de interventoría se crea el gasto en "Gastos reales", con el proveedor, la factura y el valor. Si el director la reabre, ese gasto se borra.
+- La campana avisa las RQ solicitadas y las aprobadas que faltan por atender.
+- Cada RQ tiene adjuntos (`data-adj="requisicion:id"`) y se exporta a Excel y a Word con el valor en letras y las firmas.
+- Tablas `requisicion` y `requisicion_item`, incluidas en la sincronización (`TABLAS_ORDEN`), en los permisos y en el borrado en cascada.
+
+## 6. Mejora implementada: la lista de chequeo documental del acta
 
 - La primera vez que se abre un acta, SIGI Pro crea su lista de requisitos: hay una para las actas de obra y otra para las cuentas de interventoría. Los requisitos por defecto son el oficio de radicación, las memorias, las fotos, los ensayos, la seguridad social, las pólizas, SST y ambiental, la factura, el anticipo y las retenciones, y la publicación en SECOP II.
 - Cada requisito tiene un estado (Pendiente, Cumple, No cumple o No aplica), una casilla de obligatorio, el radicado, folio o enlace de SECOP II y una observación. Se pueden agregar y quitar requisitos.
