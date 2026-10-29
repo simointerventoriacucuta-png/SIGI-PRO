@@ -258,37 +258,212 @@ async function validarEstado(u, antes, d) {
 // La clave de la API se toma de ANTHROPIC_API_KEY o de datos/asistente.json (solo en este equipo)
 const ARCH_ASISTENTE = path.join(DATOS, 'asistente.json');
 const claveAsistente = () => process.env.ANTHROPIC_API_KEY || (fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')).clave : null);
-async function asistente(proyectoId, mensajes, u) {
-  const clave = claveAsistente();
-  if (!clave) throw new Rechazo(400, 'Falta la clave de la API de Claude: el director la configura en Inicio → Asistente');
-  const Anthropic = require('@anthropic-ai/sdk');
-  const cliente = new Anthropic({ apiKey: clave });
-  const r = await resumen(proyectoId);
+const MAX_VUELTAS = 8;
+
+// Herramientas del asistente. Las de lectura se ejecutan solas; las de escritura esperan la confirmación del usuario.
+const obj = (props, req = []) => ({ type: 'object', properties: props, required: req, additionalProperties: false });
+const txt = d => ({ type: 'string', description: d });
+const HERRAMIENTAS = [
+  { name: 'consultar_tabla', description: 'Lee registros de una tabla del proyecto actual. Filtros por igualdad exacta; si el valor tiene % se usa LIKE. Devuelve como máximo "limite" filas (50 por defecto).',
+    input_schema: obj({ tabla: { type: 'string', enum: ['contrato', 'item', 'acta', 'otrosi', 'gasto', 'vencimiento', 'personal', 'poliza', 'correspondencia', 'bitacora', 'ensayo'] },
+      filtros: { type: 'object', description: 'Columna → valor, p. ej. {"estado":"Pendiente"}', additionalProperties: { type: ['string', 'number'] } },
+      limite: { type: 'integer', minimum: 1, maximum: 200 } }, ['tabla']) },
+  { name: 'detalle_acta', description: 'Detalle de un acta parcial o cuenta de cobro: por ítem con movimiento, cantidad contratada, anterior, presentada, aprobada, acumulada, saldo y valores; y los totales.',
+    input_schema: obj({ acta_id: { type: 'integer', description: 'id del acta (no el número)' } }, ['acta_id']) },
+  { name: 'presupuesto', description: 'Presupuesto de un contrato del proyecto: capítulos, ítems con cantidad y valor unitario, y totales (AIU, IVA).',
+    input_schema: obj({ contrato: { type: 'string', enum: ['obra', 'interventoria'] } }, ['contrato']) },
+  { name: 'costos_interventoria', description: 'Control de costos del contrato de interventoría: presupuestado, gastado, facturado y margen por ítem.', input_schema: obj({}) },
+  { name: 'avisos', description: 'Vencimientos, pólizas, respuestas pendientes y ajustes de pólizas de los próximos 7 días (y los vencidos).', input_schema: obj({}) },
+  { name: 'buscar', description: 'Búsqueda de texto en ítems, otrosíes, actas, vencimientos, correspondencia, personal, pólizas, bitácora y ensayos.',
+    input_schema: obj({ texto: { type: 'string', minLength: 2 } }, ['texto']) },
+  { name: 'crear_vencimiento', description: 'ESCRITURA: crea un vencimiento o pendiente del proyecto. El usuario debe confirmarlo en la pantalla.',
+    input_schema: obj({ fecha: txt('AAAA-MM-DD'), descripcion: txt('Qué vence'), tipo: txt('Tipo, p. ej. Informe, Póliza, Respuesta'), responsable: txt('Responsable') }, ['fecha', 'descripcion']) },
+  { name: 'registrar_bitacora', description: 'ESCRITURA: registra una anotación diaria en la bitácora de obra. El usuario debe confirmarlo.',
+    input_schema: obj({ fecha: txt('AAAA-MM-DD'), actividades: txt('Actividades del día'), frente: txt('Frente o tramo'), clima: txt('Clima'), observaciones: txt('Observaciones') }, ['fecha', 'actividades']) },
+  { name: 'registrar_correspondencia', description: 'ESCRITURA: registra un oficio, PQRS o comunicación en la correspondencia. El usuario debe confirmarlo.',
+    input_schema: obj({ fecha: txt('AAAA-MM-DD'), sentido: { type: 'string', enum: ['Recibida', 'Enviada'] }, asunto: txt('Asunto'), de: txt('Remitente'), para: txt('Destinatario'),
+      radicado: txt('Número de radicado'), requiere_respuesta: { type: 'string', enum: ['Sí', 'No'] }, plazo: txt('Plazo de respuesta AAAA-MM-DD') }, ['fecha', 'sentido', 'asunto']) },
+];
+const ESCRITURA = { crear_vencimiento: 'vencimiento', registrar_bitacora: 'bitacora', registrar_correspondencia: 'correspondencia' };
+
+// Valida los argumentos contra el esquema (tipos, enumerados y obligatorios)
+function validarArgs(h, a) {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Rechazo(400, 'Argumentos inválidos');
+  const s = h.input_schema;
+  for (const k of s.required) if (a[k] == null || a[k] === '') throw new Rechazo(400, 'Falta ' + k);
+  for (const [k, v] of Object.entries(a)) {
+    const p = s.properties[k];
+    if (!p) throw new Rechazo(400, 'Argumento desconocido: ' + k);
+    if (p.enum && !p.enum.includes(v)) throw new Rechazo(400, `${k} debe ser uno de: ${p.enum.join(', ')}`);
+    if (p.type === 'string' && typeof v !== 'string') throw new Rechazo(400, k + ' debe ser texto');
+    if (p.type === 'integer' && !Number.isInteger(v)) throw new Rechazo(400, k + ' debe ser entero');
+    if (p.type === 'object' && (typeof v !== 'object' || v === null || Array.isArray(v))) throw new Rechazo(400, k + ' debe ser un objeto');
+  }
+  for (const k of ['fecha', 'plazo']) if (a[k] != null && !/^\d{4}-\d{2}-\d{2}$/.test(a[k])) throw new Rechazo(400, k + ' debe tener el formato AAAA-MM-DD');
+}
+
+async function contratoDe(pid, tipo) {
+  const c = await db.get('SELECT id FROM contrato WHERE proyecto_id = ? AND tipo = ?', pid, tipo);
+  if (!c) throw new Rechazo(404, 'El proyecto no tiene contrato de ' + tipo);
+  return c.id;
+}
+async function consultarTabla(pid, { tabla, filtros = {}, limite = 50 }) {
+  const donde = [TABLAS[tabla] === 'proyecto_id' ? 'proyecto_id = ?' : 'contrato_id IN (SELECT id FROM contrato WHERE proyecto_id = ?)'], vals = [pid];
+  if (tabla === 'contrato') donde[0] = 'proyecto_id = ?';
+  for (const [k, v] of Object.entries(filtros)) {
+    if (!columnas[tabla].includes(k)) throw new Rechazo(400, `La tabla ${tabla} no tiene la columna ${k}. Columnas: ${columnas[tabla].join(', ')}`);
+    if (typeof v !== 'string' && typeof v !== 'number') throw new Rechazo(400, 'Filtro inválido en ' + k);
+    donde.push(typeof v === 'string' && v.includes('%') ? `${k} LIKE ?` : `${k} = ?`); vals.push(v);
+  }
+  const filas = await db.all(`SELECT * FROM ${tabla} WHERE ${donde.join(' AND ')} ORDER BY id LIMIT ?`, ...vals, Math.min(Number(limite) || 50, 200));
+  return { tabla, columnas: columnas[tabla], filas };
+}
+const LECTURA = {
+  consultar_tabla: consultarTabla,
+  detalle_acta: async (pid, { acta_id }) => {
+    const ok = await db.get('SELECT a.id FROM acta a JOIN contrato c ON c.id = a.contrato_id WHERE a.id = ? AND c.proyecto_id = ?', acta_id, pid);
+    if (!ok) throw new Rechazo(404, 'No existe esa acta en este proyecto');
+    const d = await detalleActa(acta_id);
+    return { ...d, filas: d.filas.filter(f => f.tipo !== 1 || f.cant_presentada || f.cant_aprobada || f.acumulado)
+      .map(f => f.tipo !== 1 ? { capitulo: f.descripcion } : { codigo: f.codigo, descripcion: f.descripcion, unidad: f.unidad, contratada: f.cantidad, vr_unitario: f.vr_unitario, anterior: f.anterior,
+        presentada: f.cant_presentada, aprobada: f.cant_aprobada, acumulada: f.acumulado, saldo: f.saldo, vr_acta: f.vr_acta, pct: r2(f.pct * 100), observacion: f.observacion || undefined }) };
+  },
+  presupuesto: async (pid, { contrato }) => {
+    const p = await presupuesto(await contratoDe(pid, contrato));
+    return { totales: p.totales, items: p.items.map(i => i.tipo !== 1 ? { capitulo: i.descripcion } : { id: i.id, codigo: i.codigo, descripcion: i.descripcion, unidad: i.unidad, cantidad: i.cantidad, vr_unitario: i.vr_unitario }) };
+  },
+  costos_interventoria: async pid => {
+    const c = await costos(await contratoDe(pid, 'interventoria'));
+    return { totales: c.totales, sin_item: c.sin_item, filas: c.filas.filter(f => f.tipo === 1).map(({ codigo, descripcion, presupuestado, gastado, facturado, margen }) => ({ codigo, descripcion, presupuestado, gastado, facturado, margen })) };
+  },
+  avisos: pid => avisos(pid),
+  buscar: (pid, { texto }) => buscar(pid, texto),
+};
+
+// Ejecuta una herramienta de lectura; el error vuelve como texto para que Claude lo corrija
+async function leer(pid, nombre, args) {
+  try {
+    const h = HERRAMIENTAS.find(x => x.name === nombre);
+    if (!h || !LECTURA[nombre]) throw new Rechazo(400, 'Herramienta desconocida: ' + nombre);
+    validarArgs(h, args);
+    const s = JSON.stringify(await LECTURA[nombre](pid, args));
+    return { content: s.length > 30000 ? s.slice(0, 30000) + '… (resultado recortado: use filtros)' : s };
+  } catch (e) { return { content: 'Error: ' + e.message, is_error: true }; }
+}
+async function escribir(pid, u, nombre, args) {
+  const tabla = ESCRITURA[nombre];
+  exigir(u, tabla);
+  const d = { proyecto_id: pid, ...args };
+  const k = Object.keys(d);
+  const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
+  await auditar(u, tabla, r.id, 'crear (asistente)', d);
+  return { id: r.id, tabla };
+}
+const describir = (n, a) => ({ crear_vencimiento: `Crear vencimiento del ${a.fecha}: ${a.descripcion}`, registrar_bitacora: `Registrar en la bitácora del ${a.fecha}: ${a.actividades}`,
+  registrar_correspondencia: `Registrar correspondencia ${String(a.sentido).toLowerCase()} del ${a.fecha}: ${a.asunto}` }[n]);
+
+// Conversaciones detenidas esperando la confirmación de una escritura (se olvidan después de una hora)
+const PENDIENTES = new Map();
+
+function errorAmable(e, Anthropic) {
+  if (e instanceof Rechazo) return e.message;
+  if (e instanceof Anthropic.AuthenticationError) return 'La clave de la API de Claude no es válida';
+  if (e instanceof Anthropic.RateLimitError) return 'El asistente está ocupado: intente en un minuto';
+  if (e instanceof Anthropic.APIConnectionError) return 'Sin conexión con el servicio de Claude. Revise el internet.';
+  return e.message;
+}
+
+async function sistemaAsistente(pid, u) {
+  const r = await resumen(pid);
   const datos = { proyecto: r.proyecto, hoy: r.hoy, vencimientos: r.vencimientos,
-    contratos: r.contratos.map(c => ({ tipo: c.tipo, numero: c.numero, contratista: c.contratista, valor: c.valor, presupuesto: c.presupuesto, ejecutado: c.ejecutado, gastado: c.gastado,
-      actas: c.actas.map(a => ({ numero: a.numero, estado: a.estado, desde: a.desde, hasta: a.hasta, valor: a.valor, acumulado: a.acumulado })) })) };
-  let resp;
-  try { resp = await cliente.beta.messages.create({
-    model: 'claude-opus-5-5',
-    max_tokens: 16000,
-    output_config: { effort: 'medium' },
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: `Eres el asistente de SIGI Pro, un sistema de gestión de interventoría de obras viales en Colombia.
+    contratos: r.contratos.map(c => ({ id: c.id, tipo: c.tipo, numero: c.numero, contratista: c.contratista, valor: c.valor, valor_vigente: c.valor_vigente, fecha_fin_vigente: c.fecha_fin_vigente,
+      presupuesto: c.presupuesto, ejecutado: c.ejecutado, gastado: c.gastado,
+      actas: c.actas.map(a => ({ id: a.id, numero: a.numero, estado: a.estado, desde: a.desde, hasta: a.hasta, valor: a.valor, acumulado: a.acumulado })) })) };
+  return `Eres el asistente de SIGI Pro, un sistema de gestión de interventoría de obras viales en Colombia.
 Respondes en español, con precisión y de forma breve, como un ingeniero de interventoría con experiencia en contratación estatal (Ley 80, Ley 1474, Ley 1150).
-Usa solo los datos del proyecto que se dan abajo; si algo no está en los datos, dilo. Valores en pesos colombianos.
+Usa los datos del proyecto que se dan abajo y consulta con las herramientas lo que falte; si algo no está en los datos, dilo. Valores en pesos colombianos.
+Formato: markdown sencillo (**negrita**, listas con "-", tablas con "|").
+Usa las herramientas de ESCRITURA solo cuando el usuario pida registrar algo; la aplicación le pedirá confirmación antes de guardarlo. No inventes datos para completarlas: pregunta lo que falte.
 Usuario actual: ${u ? `${u.nombre} (${u.rol})` : 'sin identificar'}.
 
 DATOS DEL PROYECTO (JSON):
-${JSON.stringify(datos)}` }],
-    messages: mensajes.slice(-20).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
-  }); } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Rechazo(400, 'La clave de la API de Claude no es válida');
-    if (e instanceof Anthropic.RateLimitError) throw new Rechazo(429, 'El asistente está ocupado: intente en un minuto');
-    throw e;
+${JSON.stringify(datos)}`;
+}
+
+// Bucle de herramientas con respuesta en tiempo real. ev(evento, datos) envía cada evento al navegador.
+async function asistente(pid, b, u, ev) {
+  const clave = claveAsistente();
+  if (!clave) throw new Rechazo(400, 'Falta la clave de la API de Claude. El director la configura en Inicio → Asistente → Clave del asistente.');
+  const Anthropic = require('@anthropic-ai/sdk');
+  const cliente = new Anthropic({ apiKey: clave });
+  let mensajes;
+  if (b.continuar) {
+    const p = PENDIENTES.get(b.continuar);
+    if (!p || p.pid !== pid || p.uid !== (u?.id ?? null)) throw new Rechazo(404, 'La acción ya no está pendiente');
+    PENDIENTES.delete(b.continuar);
+    mensajes = p.mensajes;
+    const resultados = [...p.resultados];
+    for (const t of p.escrituras) {
+      if (!b.aprobar) { resultados.push({ type: 'tool_result', tool_use_id: t.id, content: 'El usuario canceló esta acción; no se guardó nada.', is_error: true }); continue; }
+      try { const r = await escribir(pid, u, t.name, t.input); resultados.push({ type: 'tool_result', tool_use_id: t.id, content: JSON.stringify({ guardado: true, ...r }) }); ev('guardado', { tabla: r.tabla }); }
+      catch (e) { resultados.push({ type: 'tool_result', tool_use_id: t.id, content: 'Error: ' + e.message, is_error: true }); }
+    }
+    mensajes.push({ role: 'user', content: resultados });
+  } else {
+    mensajes = (b.mensajes || []).slice(-20).filter(m => String(m.content || '').trim()).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) }));
+    while (mensajes.length && mensajes[0].role !== 'user') mensajes.shift();
+    if (!mensajes.length) throw new Rechazo(400, 'Escriba una pregunta');
+    const ult = mensajes[mensajes.length - 1];
+    if (b.vista) ult.content = `[Vista abierta en la aplicación: ${String(b.titulo || '').slice(0, 120)} (${String(b.vista).slice(0, 60)})]\n${ult.content}`;
   }
-  if (resp.stop_reason === 'refusal') return { texto: 'El asistente no puede responder esa consulta.' };
-  return { texto: resp.content.filter(b => b.type === 'text').map(b => b.text).join('\n') };
+  const sistema = await sistemaAsistente(pid, u);
+  try {
+    for (let vuelta = 0; vuelta < MAX_VUELTAS; vuelta++) {
+      const flujo = cliente.beta.messages.stream({
+        model: 'claude-opus-5-5',
+        max_tokens: 16000,
+        output_config: { effort: 'medium' },
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: sistema }],
+        tools: HERRAMIENTAS,
+        messages: mensajes,
+      });
+      flujo.on('text', t => ev('texto', { t }));
+      const resp = await flujo.finalMessage();
+      if (resp.stop_reason === 'refusal') return ev('texto', { t: '\n\nEl asistente no puede responder esa consulta. Intente formularla de otra manera.' });
+      mensajes.push({ role: 'assistant', content: resp.content });
+      if (resp.stop_reason === 'pause_turn') continue;
+      if (resp.stop_reason !== 'tool_use') return;
+      const resultados = [], escrituras = [];
+      for (const t of resp.content.filter(x => x.type === 'tool_use')) {
+        if (!ESCRITURA[t.name]) { ev('herramienta', { nombre: t.name }); resultados.push({ type: 'tool_result', tool_use_id: t.id, ...(await leer(pid, t.name, t.input)) }); continue; }
+        try { validarArgs(HERRAMIENTAS.find(x => x.name === t.name), t.input); exigir(u, ESCRITURA[t.name]); escrituras.push(t); }
+        catch (e) { resultados.push({ type: 'tool_result', tool_use_id: t.id, content: 'Error: ' + e.message, is_error: true }); }
+      }
+      if (escrituras.length) {
+        for (const [k, p] of PENDIENTES) if (Date.now() - p.creado > 3600000) PENDIENTES.delete(k);
+        const id = require('node:crypto').randomUUID();
+        PENDIENTES.set(id, { pid, uid: u?.id ?? null, mensajes, resultados, escrituras, creado: Date.now() });
+        return ev('confirmar', { id, acciones: escrituras.map(t => describir(t.name, t.input)) });
+      }
+      mensajes.push({ role: 'user', content: resultados });
+      ev('texto', { t: '\n\n' });
+    }
+    ev('texto', { t: '\n\n(Se alcanzó el límite de consultas para esta pregunta: pídame que continúe si hace falta.)' });
+  } catch (e) { throw new Rechazo(e instanceof Anthropic.AuthenticationError ? 400 : e.status || 500, errorAmable(e, Anthropic)); }
+}
+
+// Respuesta en tiempo real (Server-Sent Events). Los errores antes del primer evento salen como JSON.
+async function asistenteSSE(req, res, pid, u) {
+  const b = await leerCuerpo(req);
+  const ev = (nombre, datos) => {
+    if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.write(`event: ${nombre}\ndata: ${JSON.stringify(datos)}\n\n`);
+  };
+  try { await asistente(pid, b, u, ev); }
+  catch (e) { if (!res.headersSent) throw e; ev('error', { mensaje: e.message }); }
+  ev('fin', {}); res.end();
 }
 
 // ---------- HTTP ----------
@@ -336,7 +511,7 @@ async function api(req, res, url) {
     await auditar(u, 'asistente', null, 'configurar', null);
     return enviar(res, 200, { ok: true });
   }
-  if (r0 === 'asistente' && req.method === 'POST') { const b = await leerCuerpo(req); return enviar(res, 200, await asistente(Number(r1), b.mensajes || [], u)); }
+  if (r0 === 'asistente' && req.method === 'POST') return asistenteSSE(req, res, Number(r1), u);
   if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
   if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 
@@ -461,3 +636,5 @@ module.exports = iniciar().then(() => new Promise(ok => servidor.listen(PUERTO, 
   console.log(`SIGI listo en http://localhost:${p} (base: ${db.estado.modo})`);
   ok(p);
 })));
+// Para pruebas: herramientas del asistente
+module.exports.asistente = { HERRAMIENTAS, leer, escribir, validarArgs };
