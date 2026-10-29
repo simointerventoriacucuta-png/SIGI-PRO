@@ -57,6 +57,8 @@ const bloqueada = a => !!a && ESTADOS_ACTA.indexOf(a.estado) >= BLOQUEO;
 const QUIEN_ESTADO = { 'Aprobada interventoría': ['director'], 'Avalada entidad': ['director', 'administrativo'], Pagada: ['director', 'administrativo'] };
 
 class Rechazo extends Error { constructor(codigo, msg) { super(msg); this.codigo = codigo; } }
+// Un archivo importado que no se puede leer es un error del archivo (400), no del servidor
+const archivoMalo = leer => { try { return leer(); } catch (e) { throw new Rechazo(400, e.message); } };
 
 async function usuarioDe(req) {
   const id = Number(req.headers['x-usuario']);
@@ -286,7 +288,7 @@ async function avisos(proyectoId) {
       out.push({ fecha: r.plazo, tipo: nombre, texto: [r.tipo || r.componente, r.accion || r[campo]].filter(Boolean).join(': '), abrir: 'tabla:' + tabla });
   for (const m of await db.all(`SELECT * FROM pmt WHERE proyecto_id = ? AND estado <> 'Cerrado' AND hasta IS NOT NULL AND hasta <= ? ORDER BY hasta`, proyectoId, limite))
     out.push({ fecha: m.hasta, tipo: 'PMT', texto: `Vence la aprobación del PMT ${m.frente || ''} ${m.abs_ini ? '(' + m.abs_ini + ' a ' + (m.abs_fin || '') + ')' : ''}`.trim(), abrir: 'tabla:pmt' });
-  for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
+  for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND COALESCE(o.polizas_ajustadas, '') <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
   for (const c of (await resumen(proyectoId)).contratos) {
     const nombre = c.tipo === 'obra' ? 'obra' : 'interventoría';
@@ -670,7 +672,7 @@ function enviar(res, codigo, cuerpo, tipo = 'application/json; charset=utf-8') {
 }
 function leerCuerpo(req) {
   return new Promise((ok, mal) => {
-    let s = ''; req.on('data', d => (s += d)); req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { mal(e); } });
+    let s = ''; req.setEncoding('utf8'); req.on('data', d => (s += d)); req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch { mal(new Rechazo(400, 'El cuerpo de la petición no es JSON válido')); } });
   });
 }
 function limpiar(tabla, datos) {
@@ -725,7 +727,7 @@ async function api(req, res, url) {
   if (r0 === 'xlsx' && r1 === 'importar' && req.method === 'POST') {
     exigir(u, 'item');
     const b = await leerCuerpo(req), cid = Number(r2_);
-    const filas = await integ.leerPresupuestoXlsx(Buffer.from(b.archivo || '', 'base64'));
+    const filas = await integ.leerPresupuestoXlsx(Buffer.from(b.archivo || '', 'base64')).catch(e => { throw new Rechazo(400, 'No se pudo leer el Excel: ' + e.message); });
     let orden = (await db.get('SELECT COALESCE(MAX(orden), 0) m FROM item WHERE contrato_id = ?', cid)).m, padre = null;
     for (const f of filas) {
       const cap = !f.unidad && !f.cantidad;
@@ -739,7 +741,7 @@ async function api(req, res, url) {
   // Microsoft Project: importar (reemplaza el programa) y exportar
   if (r0 === 'project' && req.method === 'POST') {
     exigir(u, 'tarea');
-    const pid = Number(r1), tareas = integ.leerProject((await leerCuerpo(req)).xml || '');
+    const pid = Number(r1), xml = (await leerCuerpo(req)).xml || '', tareas = archivoMalo(() => integ.leerProject(xml));
     for (const t of await db.all('SELECT id FROM tarea WHERE proyecto_id = ?', pid)) await db.run('DELETE FROM tarea WHERE id = ?', t.id);
     let orden = 0;
     for (const t of tareas) await db.run('INSERT INTO tarea (proyecto_id, wbs, nombre, nivel, inicio, fin, avance_real, resumen, hito, orden) VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -755,7 +757,7 @@ async function api(req, res, url) {
   // Autodesk (LandXML de Civil 3D / InfraWorks) y avance en el plano
   if (r0 === 'landxml' && req.method === 'POST') {
     exigir(u, 'alineamiento');
-    const pid = Number(r1), alins = integ.leerLandXML((await leerCuerpo(req)).xml || '');
+    const pid = Number(r1), xml = (await leerCuerpo(req)).xml || '', alins = archivoMalo(() => integ.leerLandXML(xml));
     for (const a of alins) await db.run('INSERT INTO alineamiento (proyecto_id, nombre, abs_ini, longitud, puntos) VALUES (?,?,?,?,?)', pid, a.nombre, a.abs_ini, a.longitud, JSON.stringify(a.puntos));
     await auditar(u, 'alineamiento', null, 'importar-landxml', { alineamientos: alins.map(a => a.nombre) });
     return enviar(res, 200, { ok: true, alineamientos: alins.length });

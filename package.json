@@ -7,7 +7,8 @@
     "scripts": {
         "app": "electron .",
         "servidor": "node server.js",
-        "instalador": "electron-builder --win nsis"
+        "instalador": "electron-builder --win nsis",
+        "test": "node --test --test-concurrency=1 test/e2e.test.js"
     },
     "build": {
         "appId": "co.simo.sigi",

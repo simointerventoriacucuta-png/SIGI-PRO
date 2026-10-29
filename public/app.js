@@ -28,6 +28,8 @@ async function api(ruta, metodo = 'GET', cuerpo) {
   if (!r.ok || (d && d.error)) throw new Error(d.error || r.statusText);
   return d;
 }
+// Un error de la API que ninguna función atrapó (p. ej. un rol sin permiso) se muestra en la barra de estado
+window.addEventListener('unhandledrejection', e => { e.preventDefault(); aviso('Error: ' + (e.reason?.message || e.reason)); });
 function aviso(t) { $('#estado-mensaje').textContent = t; clearTimeout(aviso.t); aviso.t = setTimeout(() => ($('#estado-mensaje').textContent = ''), 4000); }
 function descargar(nombre, texto, tipo = 'text/csv;charset=utf-8') {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: tipo })); a.download = nombre; a.click(); URL.revokeObjectURL(a.href);
@@ -152,8 +154,8 @@ $('#btn-inicio-rapido').onclick = () => abrir('tablero');
 $('#btn-captura').onclick = () => capturarAvance();
 document.addEventListener('keydown', e => { if (e.key === 'F5') { e.preventDefault(); refrescar(); } });
 $('#grupos-cinta').addEventListener('click', e => {
-  const b = e.target.closest('.btn-cinta'); if (!b || b.disabled) return;
-  CINTA[E.cinta][1][b.dataset.g][1][b.dataset.b][2]();
+  const b = e.target.closest('.btn-cinta, .btn-chico'); if (!b || b.disabled) return;
+  Promise.resolve().then(() => CINTA[E.cinta][1][b.dataset.g][1][b.dataset.b][2]()).catch(er => aviso('Error: ' + er.message));
 });
 
 // ---------- Explorador ----------
@@ -253,13 +255,15 @@ function editable(cont, alGuardar) {
     const fin = async guardar => {
       if (hecho) return; hecho = true;
       if (guardar && campo.value !== valor) { try { await alGuardar(td, tipo === 'num' ? num(campo.value) : campo.value); aviso('Guardado'); } catch (er) { aviso('Error: ' + er.message); } }
-      pintarDocs(); if (guardar) refrescarSilencioso();
+      // Primero se traen los datos nuevos: varias vistas (otrosíes, suspensiones, liquidación) se pintan con el resumen
+      if (guardar) await refrescarSilencioso().catch(() => {});
+      pintarDocs();
     };
     campo.addEventListener('blur', () => fin(true));
     campo.addEventListener('keydown', ev => { if (ev.key === 'Enter') campo.blur(); if (ev.key === 'Escape') fin(false); });
   });
 }
-async function refrescarSilencioso() { E.res = await api('resumen/' + E.pid); pintarArbol(); pintarLateral(); estadoProyecto(); }
+async function refrescarSilencioso() { E.res = await api('resumen/' + E.pid); pintarCampana(); pintarArbol(); pintarLateral(); estadoProyecto(); }
 window.celda = (v, campo, tipo = 'text', extra = '') => `<td class="edit ${tipo === 'num' ? 'num' : ''}" data-c="${campo}" data-tipo="${tipo}" data-v="${esc(v ?? '')}" ${extra}>${tipo === 'num' ? fmt(v, 2) : esc(v ?? '')}</td>`;
 
 // ---------- Vistas ----------
@@ -830,7 +834,7 @@ async function capturarAvance() {
     const largo = v.largo ?? (v.abs_ini != null && v.abs_fin != null ? Math.abs(v.abs_fin - v.abs_ini) : null);
     $('#av-memoria').textContent = largo != null ? `= ${[largo, v.ancho, v.espesor, v.piezas].filter(x => x != null).map(x => fmt(x)).join(' × ')}` : '';
   };
-  f.querySelectorAll('input, select').forEach(e => e.addEventListener('input', recalcular));
+  f.querySelectorAll('input:not(#av-cant), select').forEach(e => e.addEventListener('input', recalcular));
   $('#av-cant').addEventListener('input', () => (manual = $('#av-cant').value.trim() !== ''));
   $('#av-fotos').onchange = e => { fotos = [...e.target.files]; $('#av-nfotos').textContent = `${fotos.length} foto(s)`; };
   $('#av-guardar').onclick = async ev => {
