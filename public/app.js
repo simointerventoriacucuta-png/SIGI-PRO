@@ -359,12 +359,36 @@ async function vActa(cont, id) {
       <td class="num">${fmt(f.anterior)}</td>${celda(f.cant_presentada, 'cant_presentada', 'num')}${celda(f.cant_aprobada, 'cant_aprobada', 'num', f.cant_aprobada !== f.cant_presentada ? 'style="color:#b26a00;font-weight:600"' : '')}
       <td class="num">${fmt(f.acumulado)}</td><td class="num ${f.saldo < -1e-9 ? 'malo' : ''}">${fmt(f.saldo)}</td><td class="num">${pct(f.pct)}</td><td class="num">${pesos(f.vr_acta)}</td><td class="num">${pesos(f.vr_acumulado)}</td>${celda(f.observacion, 'observacion')}</tr>`).join('')}
   </tbody></table></div>
-  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>`;
+  <div class="dos-col"><div><h3 style="font-size:13px;margin:12px 0 0">Esta acta (aprobado)</h3>${tablaTotales(t.acta)}</div><div><h3 style="font-size:13px;margin:12px 0 0">Acumulado</h3>${tablaTotales(t.acumulado)}</div></div>
+  <h3 style="font-size:13px;margin:16px 0 4px">Lista de chequeo documental <span class="sub" id="chequeo-res"></span></h3>
+  <div id="chequeo-acta"></div>`;
+  pintarChequeo(id, bloq);
   editable($('#g-acta'), (td, v) => api(`acta/${id}/item/${td.closest('tr').dataset.id}`, 'PUT', { [td.dataset.c]: v }));
   editable($('#g-acta-cab'), (td, v) => api('t/acta/' + id, 'PUT', { [td.dataset.c]: v }));
   $('#pasos-acta').onclick = async e => {
     const b = e.target.closest('.paso'); if (!b || b.disabled || !confirm(`¿Pasar el acta ${a.numero} a "${b.dataset.e}"?`)) return;
     try { await api('t/acta/' + id, 'PUT', { estado: b.dataset.e }); aviso('Estado: ' + b.dataset.e); await refrescar(); } catch (er) { aviso('Error: ' + er.message); }
+  };
+}
+// Lista de chequeo documental: sin todos los obligatorios en "Cumple" o "No aplica" no se aprueba el acta
+async function pintarChequeo(id, bloq, ch) {
+  ch = ch || await api(`acta/${id}/chequeo`);
+  const cont = $('#chequeo-acta'); if (!cont) return;
+  $('#chequeo-res').textContent = ch.completo ? '· completa: se puede aprobar' : `· faltan ${ch.faltan} obligatorios para aprobar`;
+  const color = { Cumple: '#1b7a3a', 'No cumple': '#b3261e', 'No aplica': '#666', Pendiente: '#b26a00' };
+  cont.innerHTML = `<div class="grilla-cont"><table class="grilla" id="g-chequeo"><thead><tr><th>#</th><th>Requisito</th><th>Oblig.</th><th>Estado</th><th>Radicado / folio / enlace SECOP II</th><th>Observación</th>${bloq ? '' : '<th></th>'}</tr></thead><tbody>
+  ${ch.filas.map((f, k) => `<tr data-r="${f.id}"><td>${k + 1}</td><td>${esc(f.requisito)}</td><td>${f.obligatorio ? 'Sí' : 'No'}</td>
+    <td>${bloq ? `<span style="color:${color[f.estado]}">${esc(f.estado)}</span>` : `<select data-c="estado" style="color:${color[f.estado]}">${ch.estados.map(e => `<option ${e === f.estado ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>`}</td>
+    <td>${bloq ? esc(f.referencia ?? '') : `<input data-c="referencia" value="${esc(f.referencia ?? '')}">`}</td>
+    <td>${bloq ? esc(f.observacion ?? '') : `<input data-c="observacion" value="${esc(f.observacion ?? '')}">`}</td>
+    ${bloq ? '' : '<td><button type="button" data-borrar title="Quitar requisito">✕</button></td>'}</tr>`).join('')}
+  </tbody></table></div>${bloq ? '' : '<button type="button" id="chequeo-nuevo" style="margin-top:6px">+ Requisito</button>'}`;
+  if (bloq) return;
+  const guardar = async (rid, metodo, cuerpo) => { try { pintarChequeo(id, bloq, await api(`acta/${id}/chequeo/${rid}`, metodo, cuerpo)); } catch (er) { aviso('Error: ' + er.message); } };
+  cont.onchange = e => { const c = e.target.dataset.c; if (c) guardar(e.target.closest('tr').dataset.r, 'PUT', { [c]: e.target.value }); };
+  cont.onclick = e => {
+    if (e.target.closest('[data-borrar]') && confirm('¿Quitar este requisito?')) guardar(e.target.closest('tr').dataset.r, 'DELETE');
+    if (e.target.id === 'chequeo-nuevo') { const r = prompt('Nuevo requisito:'); if (r) api(`acta/${id}/chequeo`, 'POST', { requisito: r }).then(x => pintarChequeo(id, bloq, x)).catch(er => aviso('Error: ' + er.message)); }
   };
 }
 async function nuevaActa(tipo) {

@@ -23,7 +23,7 @@ const TABLAS = {
 const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id']],
   contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id']],
-  acta: [['acta_item', 'acta_id']],
+  acta: [['acta_item', 'acta_id'], ['acta_requisito', 'acta_id']],
   item: [['item', 'padre_id'], ['acta_item', 'item_id']],
 };
 const columnas = {};
@@ -67,6 +67,29 @@ function diferencia(antes, despues) {
   for (const k of Object.keys(despues)) if ((antes?.[k] ?? null) !== (despues[k] ?? null)) d[k] = [antes?.[k] ?? null, despues[k] ?? null];
   return d;
 }
+// ---------- Lista de chequeo documental del acta ----------
+const ESTADOS_REQ = ['Pendiente', 'Cumple', 'No cumple', 'No aplica'];
+// Requisitos usuales para tramitar un acta de pago en obra vial (se pueden ajustar por acta)
+const REQUISITOS = {
+  obra: ['Oficio de radicación del acta por el contratista', 'Memorias de cálculo de cantidades', 'Registro fotográfico del periodo',
+    'Resultados de ensayos de laboratorio que soportan los ítems', 'Planilla de seguridad social y parafiscales del periodo (art. 50 Ley 789 de 2002)',
+    'Pólizas vigentes y ajustadas a otrosíes', 'Informe de SST y ambiental del periodo', 'Factura electrónica',
+    'Amortización del anticipo y retenciones calculadas', 'Publicación de soportes en SECOP II'],
+  interventoria: ['Informe mensual de interventoría', 'Planilla de seguridad social y parafiscales del periodo', 'Factura electrónica o cuenta de cobro',
+    'Certificado de cumplimiento del supervisor', 'Pólizas vigentes', 'Publicación de soportes en SECOP II'],
+};
+async function chequeo(actaId) {
+  const a = await db.get('SELECT a.*, c.tipo FROM acta a JOIN contrato c ON c.id = a.contrato_id WHERE a.id = ?', actaId);
+  if (!a) throw new Rechazo(404, 'No existe el acta');
+  let filas = await db.all('SELECT * FROM acta_requisito WHERE acta_id = ? ORDER BY orden, id', actaId);
+  if (!filas.length) {
+    let n = 0;
+    for (const r of REQUISITOS[a.tipo] || REQUISITOS.obra) await db.run('INSERT INTO acta_requisito (acta_id, orden, requisito) VALUES (?,?,?)', actaId, ++n, r);
+    filas = await db.all('SELECT * FROM acta_requisito WHERE acta_id = ? ORDER BY orden, id', actaId);
+  }
+  const faltan = filas.filter(f => f.obligatorio && !['Cumple', 'No aplica'].includes(f.estado));
+  return { estados: ESTADOS_REQ, filas, completo: !faltan.length, faltan: faltan.length };
+}
 async function actaEditable(actaId) {
   const a = await db.get('SELECT * FROM acta WHERE id = ?', actaId);
   if (bloqueada(a)) throw new Rechazo(409, `El acta ${a.numero} está "${a.estado}" y no se puede editar`);
@@ -90,7 +113,7 @@ async function iniciar() {
 
 async function borrar(tabla, id) {
   for (const [hijo, col] of HIJOS[tabla] || []) {
-    if (hijo === 'acta_item') { await db.run(`DELETE FROM acta_item WHERE ${col} = ?`, id); continue; }
+    if (hijo === 'acta_item' || hijo === 'acta_requisito') { await db.run(`DELETE FROM acta_item WHERE ${col} = ?`, id); continue; }
     for (const h of await db.all(`SELECT id FROM ${hijo} WHERE ${col} = ?`, id)) await borrar(hijo, h.id);
   }
   if (tabla === 'gasto' || tabla === 'item') await db.run('UPDATE gasto SET item_id = NULL WHERE item_id = ?', tabla === 'item' ? id : -1);
@@ -250,6 +273,10 @@ async function validarEstado(u, antes, d) {
       throw new Rechazo(409, `El acta ${antes.numero} está "${antes.estado}" y no se puede editar`);
     if (ESTADOS_ACTA.indexOf(d.estado) < BLOQUEO && u.rol !== 'director') throw new Rechazo(403, 'Solo el director puede reabrir un acta aprobada');
   }
+  if (antes && d.estado != null && ESTADOS_ACTA.indexOf(d.estado) >= BLOQUEO && !bloqueada(antes)) {
+    const ch = await chequeo(antes.id);
+    if (!ch.completo) throw new Rechazo(409, `Faltan ${ch.faltan} requisitos obligatorios de la lista de chequeo documental para aprobar el acta`);
+  }
   if (d.estado != null && d.estado !== antes?.estado && QUIEN_ESTADO[d.estado] && !QUIEN_ESTADO[d.estado].includes(u.rol))
     throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
 }
@@ -360,6 +387,30 @@ async function api(req, res, url) {
       ['saldo', 'Saldo'], ['vr_acta', 'Vr. esta acta'], ['vr_acumulado', 'Vr. acumulado'], ['observacion', 'Observación']];
     res.setHeader('Content-Disposition', `attachment; filename="Acta_${d.acta.numero}.csv"`);
     return enviar(res, 200, csv(d.filas, cols), 'text/csv; charset=utf-8');
+  }
+  if (r0 === 'acta' && r2_ === 'chequeo') {
+    const aid = Number(r1);
+    if (req.method === 'GET') return enviar(res, 200, await chequeo(aid));
+    exigir(u, 'acta'); await actaEditable(aid);
+    const b = await leerCuerpo(req);
+    if (b.estado != null && !ESTADOS_REQ.includes(b.estado)) throw new Rechazo(400, 'Estado desconocido: ' + b.estado);
+    if (req.method === 'POST') {
+      if (!String(b.requisito || '').trim()) throw new Rechazo(400, 'Escriba el requisito');
+      const o = (await db.get('SELECT COALESCE(MAX(orden), 0) + 1 m FROM acta_requisito WHERE acta_id = ?', aid)).m;
+      const r = await db.run('INSERT INTO acta_requisito (acta_id, orden, requisito, obligatorio) VALUES (?,?,?,?)', aid, o, String(b.requisito).trim(), b.obligatorio === 0 ? 0 : 1);
+      await auditar(u, 'acta_requisito', r.id, 'crear', { acta_id: aid, requisito: b.requisito });
+      return enviar(res, 200, await chequeo(aid));
+    }
+    const antes = await db.get('SELECT * FROM acta_requisito WHERE id = ? AND acta_id = ?', Number(r3), aid);
+    if (!antes) throw new Rechazo(404, 'No existe el requisito');
+    if (req.method === 'DELETE') { await db.run('DELETE FROM acta_requisito WHERE id = ?', antes.id); await auditar(u, 'acta_requisito', antes.id, 'borrar', antes); return enviar(res, 200, await chequeo(aid)); }
+    if (req.method === 'PUT') {
+      const d = {}; for (const k of ['estado', 'referencia', 'observacion', 'obligatorio', 'requisito']) if (k in b) d[k] = b[k] === '' ? null : b[k];
+      const k = Object.keys(d);
+      if (k.length) await db.run(`UPDATE acta_requisito SET ${k.map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), antes.id);
+      await auditar(u, 'acta_requisito', antes.id, 'editar', diferencia(antes, d));
+      return enviar(res, 200, await chequeo(aid));
+    }
   }
   if (r0 === 'acta' && req.method === 'GET') return enviar(res, 200, (await detalleActa(Number(r1))) || { error: 'No existe' });
   if (r0 === 'acta' && r2_ === 'item' && req.method === 'PUT') {

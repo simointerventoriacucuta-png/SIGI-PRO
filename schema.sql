@@ -205,3 +205,15 @@ CREATE TABLE IF NOT EXISTS otrosi (
   estado TEXT DEFAULT 'Firmado',    -- En trámite, Firmado, Anulado
   polizas_ajustadas TEXT DEFAULT 'No'
 );
+
+-- Lista de chequeo documental de cada acta (hoja de ruta, punto 9)
+CREATE TABLE IF NOT EXISTS acta_requisito (
+  id INTEGER PRIMARY KEY,
+  acta_id INTEGER NOT NULL REFERENCES acta(id) ON DELETE CASCADE,
+  orden INTEGER DEFAULT 0,
+  requisito TEXT NOT NULL,
+  obligatorio INTEGER DEFAULT 1,
+  estado TEXT DEFAULT 'Pendiente',  -- Pendiente, Cumple, No cumple, No aplica
+  referencia TEXT,                  -- radicado, folio o enlace de SECOP II
+  observacion TEXT
+);
