@@ -17,6 +17,7 @@ const db = new Base(DATOS);
 // Tablas que se pueden editar con la API genérica, y la columna que las ata al padre
 const TABLAS = {
   proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', otrosi: 'contrato_id', gasto: 'contrato_id',
+  suspension: 'contrato_id', liquidacion: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
   correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
   tarea: 'proyecto_id', alineamiento: 'proyecto_id', tramo: 'proyecto_id', sst: 'proyecto_id', sst_mes: 'proyecto_id', ambiental: 'proyecto_id', pmt: 'proyecto_id', social: 'proyecto_id',
@@ -26,7 +27,7 @@ const HIJOS = {
   proyecto: [['contrato', 'proyecto_id'], ['vencimiento', 'proyecto_id'], ['personal', 'proyecto_id'], ['poliza', 'proyecto_id'], ['correspondencia', 'proyecto_id'], ['bitacora', 'proyecto_id'], ['ensayo', 'proyecto_id'],
     ['tarea', 'proyecto_id'], ['tramo', 'proyecto_id'], ['alineamiento', 'proyecto_id'], ['sst', 'proyecto_id'], ['sst_mes', 'proyecto_id'], ['ambiental', 'proyecto_id'], ['pmt', 'proyecto_id'], ['social', 'proyecto_id']],
   alineamiento: [['tramo', 'alineamiento_id']],
-  contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id']],
+  contrato: [['otrosi', 'contrato_id'], ['acta', 'contrato_id'], ['item', 'contrato_id'], ['gasto', 'contrato_id'], ['suspension', 'contrato_id'], ['liquidacion', 'contrato_id']],
   acta: [['acta_item', 'acta_id']],
   item: [['item', 'padre_id'], ['acta_item', 'item_id']],
 };
@@ -39,7 +40,7 @@ const PERMISOS = {
   director: '*',
   residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia', 'tarea', 'alineamiento', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
   especialista: ['acta_item', 'bitacora', 'ensayo', 'tramo', 'sst', 'sst_mes', 'ambiental', 'pmt', 'social'],
-  administrativo: ['otrosi', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
+  administrativo: ['otrosi', 'suspension', 'liquidacion', 'acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
   entidad: [],
 };
 const puede = (u, recurso) => !!u && (PERMISOS[u.rol] === '*' || (PERMISOS[u.rol] || []).includes(recurso));
@@ -164,6 +165,13 @@ async function costos(contratoId) {
       facturado_total: totales(c, cdFacturado).total, valor_contrato: tp.total } };
 }
 
+const hoyISO = () => new Date().toISOString().slice(0, 10);
+const sumarDias = (f, n) => (f && n ? new Date(new Date(f + 'T00:00:00Z').getTime() + n * 86400000).toISOString().slice(0, 10) : f);
+const diasEntre = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000)) : 0);
+const sumarMeses = (f, n) => { if (!f) return null; const d = new Date(f + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+// Plazos de liquidación (Ley 1150 de 2007, art. 11) contados desde la terminación vigente
+const plazosLiquidacion = fin => (fin ? { bilateral: sumarMeses(fin, 4), unilateral: sumarMeses(fin, 6), judicial: sumarMeses(fin, 30) } : null);
+
 async function resumen(proyectoId) {
   const p = await db.get('SELECT * FROM proyecto WHERE id = ?', proyectoId);
   const contratos = [];
@@ -180,8 +188,12 @@ async function resumen(proyectoId) {
     const otrosis = await db.all('SELECT * FROM otrosi WHERE contrato_id = ? ORDER BY numero, id', c.id);
     const firmados = otrosis.filter(o => o.estado === 'Firmado');
     const adiciones = r2(firmados.reduce((s, o) => s + (o.valor || 0), 0)), prorroga = firmados.reduce((s, o) => s + (o.dias || 0), 0);
-    const finVigente = c.fecha_fin && prorroga ? new Date(new Date(c.fecha_fin + 'T00:00:00Z').getTime() + prorroga * 86400000).toISOString().slice(0, 10) : c.fecha_fin;
-    contratos.push({ ...c, otrosis, adiciones, prorroga_dias: prorroga, valor_vigente: r2((c.valor || 0) + adiciones), fecha_fin_vigente: finVigente, presupuesto: pr.totales.total, costo_directo: pr.totales.costo_directo, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado, gastado });
+    // Suspensiones: los días suspendidos (hasta hoy si sigue suspendido) corren la terminación
+    const suspensiones = await db.all('SELECT * FROM suspension WHERE contrato_id = ? ORDER BY numero, id', c.id);
+    const diasSusp = suspensiones.reduce((s, x) => s + diasEntre(x.fecha_suspension, x.estado === 'Reiniciado' && x.fecha_reinicio ? x.fecha_reinicio : hoyISO()), 0);
+    const finVigente = sumarDias(c.fecha_fin, prorroga + diasSusp);
+    const liquidacion = (await db.get('SELECT * FROM liquidacion WHERE contrato_id = ?', c.id)) || null;
+    contratos.push({ ...c, otrosis, suspensiones, dias_suspendidos: diasSusp, suspendido: suspensiones.some(x => x.estado === 'Suspendido'), liquidacion, plazos_liquidacion: plazosLiquidacion(finVigente), adiciones, prorroga_dias: prorroga, valor_vigente: r2((c.valor || 0) + adiciones), fecha_fin_vigente: finVigente, presupuesto: pr.totales.total, costo_directo: pr.totales.costo_directo, items: pr.items.filter(i => i.tipo === 1).length, actas, ejecutado, gastado });
   }
   const vencimientos = await db.all(`SELECT * FROM vencimiento WHERE proyecto_id = ? AND estado <> 'Cumplido' ORDER BY fecha IS NULL, fecha`, proyectoId);
   const conteos = {};
@@ -248,6 +260,20 @@ async function avisos(proyectoId) {
     out.push({ fecha: m.hasta, tipo: 'PMT', texto: `Vence la aprobación del PMT ${m.frente || ''} ${m.abs_ini ? '(' + m.abs_ini + ' a ' + (m.abs_fin || '') + ')' : ''}`.trim(), abrir: 'tabla:pmt' });
   for (const o of await db.all(`SELECT o.*, c.tipo ct FROM otrosi o JOIN contrato c ON c.id = o.contrato_id WHERE c.proyecto_id = ? AND o.estado = 'Firmado' AND o.polizas_ajustadas <> 'Sí'`, proyectoId))
     out.push({ fecha: o.fecha || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el otrosí ${o.numero} (${o.ct === 'obra' ? 'obra' : 'interventoría'})`, abrir: 'otrosis:' + o.contrato_id });
+  for (const c of (await resumen(proyectoId)).contratos) {
+    const nombre = c.tipo === 'obra' ? 'obra' : 'interventoría';
+    for (const x of c.suspensiones) {
+      if (x.estado === 'Suspendido' && diasEntre(x.fecha_suspension, iso(hoy)) > 30)
+        out.push({ fecha: x.fecha_suspension, tipo: 'Suspensión', texto: `Contrato de ${nombre} suspendido hace ${diasEntre(x.fecha_suspension, iso(hoy))} días (suspensión ${x.numero})`, abrir: 'suspensiones:' + c.id });
+      if (x.estado === 'Reiniciado' && x.polizas_ajustadas !== 'Sí')
+        out.push({ fecha: x.fecha_reinicio || iso(hoy), tipo: 'Pólizas', texto: `Ajustar las pólizas por el reinicio de la suspensión ${x.numero} (${nombre})`, abrir: 'suspensiones:' + c.id });
+    }
+    const pl = c.plazos_liquidacion, liq = c.liquidacion;
+    if (!pl || (liq && ['Firmada', 'Cerrada'].includes(liq.estado))) continue;
+    const alerta = iso(new Date(hoy.getTime() + 30 * 86400000));
+    for (const [k, txt] of [['bilateral', 'liquidación bilateral'], ['unilateral', 'liquidación unilateral'], ['judicial', 'liquidación judicial (caducidad)']])
+      if (pl[k] >= iso(hoy) && pl[k] <= alerta) out.push({ fecha: pl[k], tipo: 'Liquidación', texto: `Vence el plazo de ${txt} del contrato de ${nombre}`, abrir: 'liquidacion:' + c.id });
+  }
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
@@ -523,6 +549,7 @@ async function api(req, res, url) {
       if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (tabla === 'social' && d.tipo === 'PQRS' && !d.plazo) d.plazo = diasHabiles(d.fecha || new Date().toISOString().slice(0, 10), 15);
       if (tabla === 'otrosi' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM otrosi WHERE contrato_id = ?', d.contrato_id)).m;
+      if (tabla === 'suspension' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM suspension WHERE contrato_id = ?', d.contrato_id)).m;
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       const k = Object.keys(d);
       const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
