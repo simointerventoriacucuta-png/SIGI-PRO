@@ -1,41 +1,42 @@
 {
-    "name":  "sigi",
-    "productName":  "SIGI Pro",
-    "version":  "0.1.0",
-    "description":  "Sistema Integral de GestiÃƒÂ³n de InterventorÃƒÂ­a",
-    "main":  "main.js",
-    "scripts":  {
-                    "app":  "electron .",
-                    "servidor":  "node server.js",
-                    "instalador":  "electron-builder --win nsis"
-                },
-    "build":  {
-                  "appId":  "co.simo.sigi",
-                  "productName":  "SIGI Pro",
-                  "files":  [
-                                "main.js",
-                                "server.js",
-                                "db.js",
-                                "schema.sql",
-                                "seed/**",
-                                "public/**",
-                                "build/icono.*"
-                            ],
-                  "win":  {
-                              "target":  "nsis",
-                              "icon":  "build/icono.ico"
-                          },
-                  "nsis":  {
-                               "oneClick":  false,
-                               "allowToChangeInstallationDirectory":  true,
-                               "shortcutName":  "SIGI Pro"
-                           }
-              },
-    "devDependencies":  {
-                            "electron":  "^45.1.0",
-                            "electron-builder":  "^26.18.0"
-                        },
-    "dependencies":  {
-                         "@libsql/client":  "^0.18.0"
-                     }
+    "name": "sigi",
+    "productName": "SIGI Pro",
+    "version": "0.1.0",
+    "description": "Sistema Integral de GestiÃƒÂ³n de InterventorÃƒÂ­a",
+    "main": "main.js",
+    "scripts": {
+        "app": "electron .",
+        "servidor": "node server.js",
+        "instalador": "electron-builder --win nsis"
+    },
+    "build": {
+        "appId": "co.simo.sigi",
+        "productName": "SIGI Pro",
+        "files": [
+            "main.js",
+            "server.js",
+            "db.js",
+            "schema.sql",
+            "seed/**",
+            "public/**",
+            "build/icono.*"
+        ],
+        "win": {
+            "target": "nsis",
+            "icon": "build/icono.ico"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "shortcutName": "SIGI Pro"
+        }
+    },
+    "devDependencies": {
+        "electron": "^45.1.0",
+        "electron-builder": "^26.18.0"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^1.3.0",
+        "@libsql/client": "^0.18.0"
+    }
 }

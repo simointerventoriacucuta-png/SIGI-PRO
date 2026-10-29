@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS acta (
   desde TEXT,
   hasta TEXT,
   fecha TEXT,
-  estado TEXT DEFAULT 'Borrador',  -- Borrador, Presentada, En revisión, Aprobada, Pagada
+  estado TEXT DEFAULT 'Borrador',  -- Borrador, Radicada, En revisión, Con observaciones, Aprobada interventoría, Avalada entidad, Pagada
   observaciones TEXT,
   UNIQUE (contrato_id, numero)
 );
@@ -169,4 +169,25 @@ CREATE TABLE IF NOT EXISTS ensayo (
   especificacion TEXT,
   cumple TEXT,
   laboratorio TEXT
+);
+
+-- Usuarios de la app (sin contraseña por ahora). Rol: director, residente, especialista, administrativo, entidad
+CREATE TABLE IF NOT EXISTS usuario (
+  id INTEGER PRIMARY KEY,
+  nombre TEXT NOT NULL,
+  rol TEXT NOT NULL DEFAULT 'residente',
+  correo TEXT,              -- cuenta de Gmail con la que entra
+  activo INTEGER DEFAULT 1
+);
+
+-- Bitácora de cambios: quién, cuándo, tabla, id y cambio (JSON con antes/después)
+CREATE TABLE IF NOT EXISTS auditoria (
+  id INTEGER PRIMARY KEY,
+  fecha TEXT NOT NULL,
+  usuario_id INTEGER,
+  usuario TEXT,
+  tabla TEXT,
+  registro_id TEXT,
+  accion TEXT,              -- crear, editar, borrar
+  cambio TEXT
 );

@@ -17,7 +17,7 @@ const db = new Base(DATOS);
 const TABLAS = {
   proyecto: null, contrato: 'proyecto_id', item: 'contrato_id', acta: 'contrato_id', gasto: 'contrato_id',
   vencimiento: 'proyecto_id', personal: 'proyecto_id', poliza: 'proyecto_id',
-  correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id',
+  correspondencia: 'proyecto_id', bitacora: 'proyecto_id', ensayo: 'proyecto_id', usuario: null,
 };
 // Borrado en cascada explícito (en la nube no se puede confiar en PRAGMA foreign_keys)
 const HIJOS = {
@@ -28,11 +28,64 @@ const HIJOS = {
 };
 const columnas = {};
 
+// ---------- Usuarios, permisos y auditoría ----------
+const ROLES = ['director', 'residente', 'especialista', 'administrativo', 'entidad'];
+// Qué puede modificar cada rol (POST, PUT, DELETE). La consulta (GET) es libre para todos.
+const PERMISOS = {
+  director: '*',
+  residente: ['item', 'acta', 'acta_item', 'bitacora', 'ensayo', 'vencimiento', 'correspondencia'],
+  especialista: ['acta_item', 'bitacora', 'ensayo'],
+  administrativo: ['acta', 'gasto', 'personal', 'poliza', 'correspondencia', 'vencimiento'],
+  entidad: [],
+};
+const puede = (u, recurso) => !!u && (PERMISOS[u.rol] === '*' || (PERMISOS[u.rol] || []).includes(recurso));
+
+// Estados del acta en orden. Desde "Aprobada interventoría" el acta queda bloqueada.
+const ESTADOS_ACTA = ['Borrador', 'Radicada', 'En revisión', 'Con observaciones', 'Aprobada interventoría', 'Avalada entidad', 'Pagada'];
+const BLOQUEO = ESTADOS_ACTA.indexOf('Aprobada interventoría');
+const bloqueada = a => !!a && ESTADOS_ACTA.indexOf(a.estado) >= BLOQUEO;
+// Quién puede llevar un acta a cada estado (los primeros cuatro, quien pueda editar actas)
+const QUIEN_ESTADO = { 'Aprobada interventoría': ['director'], 'Avalada entidad': ['director', 'administrativo'], Pagada: ['director', 'administrativo'] };
+
+class Rechazo extends Error { constructor(codigo, msg) { super(msg); this.codigo = codigo; } }
+
+async function usuarioDe(req) {
+  const id = Number(req.headers['x-usuario']);
+  return id ? (await db.get('SELECT * FROM usuario WHERE id = ? AND activo = 1', id)) || null : null;
+}
+function exigir(u, recurso) {
+  if (!u) throw new Rechazo(401, 'Elija un usuario para hacer cambios');
+  if (!puede(u, recurso)) throw new Rechazo(403, `El rol ${u.rol} no tiene permiso para modificar ${recurso}`);
+}
+async function auditar(u, tabla, registroId, accion, cambio) {
+  await db.run('INSERT INTO auditoria (fecha, usuario_id, usuario, tabla, registro_id, accion, cambio) VALUES (?,?,?,?,?,?,?)',
+    new Date().toISOString(), u?.id ?? null, u ? `${u.nombre} (${u.rol})` : null, tabla, registroId == null ? null : String(registroId), accion, cambio == null ? null : JSON.stringify(cambio));
+}
+// Solo lo que cambió: { campo: [antes, después] }
+function diferencia(antes, despues) {
+  const d = {};
+  for (const k of Object.keys(despues)) if ((antes?.[k] ?? null) !== (despues[k] ?? null)) d[k] = [antes?.[k] ?? null, despues[k] ?? null];
+  return d;
+}
+async function actaEditable(actaId) {
+  const a = await db.get('SELECT * FROM acta WHERE id = ?', actaId);
+  if (bloqueada(a)) throw new Rechazo(409, `El acta ${a.numero} está "${a.estado}" y no se puede editar`);
+  return a;
+}
+
 async function iniciar() {
   await db.abrir();
   await db.exec(ESQUEMA);
+  if (!(await db.all('PRAGMA table_info(usuario)')).some(c => c.name === 'correo')) await db.run('ALTER TABLE usuario ADD COLUMN correo TEXT');
   for (const t of Object.keys(TABLAS)) columnas[t] = (await db.all(`PRAGMA table_info(${t})`)).map(c => c.name);
   if (!(await db.get('SELECT COUNT(*) n FROM proyecto')).n) await require('./seed/cucuta.js')(db);
+  // Usuarios iniciales, uno por rol (nombres genéricos; se cambian desde la app)
+  if (!(await db.get('SELECT COUNT(*) n FROM usuario')).n)
+    for (const [nombre, rol] of [['Director de interventoría', 'director'], ['Residente de obra', 'residente'], ['Especialista', 'especialista'], ['Administrativo', 'administrativo'], ['Entidad contratante', 'entidad']])
+      await db.run('INSERT INTO usuario (nombre, rol) VALUES (?, ?)', nombre, rol);
+  // Estados antiguos del acta
+  for (const [viejo, nuevo] of [['Presentada', 'Radicada'], ['Aprobada', 'Aprobada interventoría'], ['Rechazada', 'Con observaciones']])
+    await db.run('UPDATE acta SET estado = ? WHERE estado = ?', nuevo, viejo);
 }
 
 async function borrar(tabla, id) {
@@ -142,6 +195,93 @@ async function memoria(proyectoId, buscar) {
   return { actualizado: g.actualizado, total: g.hechos.length, hechos };
 }
 
+// Búsqueda global (Ctrl+K): ítems, actas y registros del proyecto
+async function buscar(proyectoId, texto) {
+  const t = (texto || '').trim();
+  if (t.length < 2) return [];
+  const like = '%' + t + '%', out = [];
+  const contratos = await db.all('SELECT id, tipo FROM contrato WHERE proyecto_id = ?', proyectoId);
+  for (const c of contratos) {
+    const nombre = c.tipo === 'obra' ? 'Presupuesto de obra' : 'Presupuesto de interventoría';
+    for (const it of await db.all('SELECT id, codigo, descripcion FROM item WHERE contrato_id = ? AND (codigo LIKE ? OR descripcion LIKE ?) ORDER BY orden LIMIT 15', c.id, like, like))
+      out.push({ grupo: nombre, titulo: [it.codigo, it.descripcion].filter(Boolean).join(' · '), abrir: 'presupuesto:' + c.id });
+    for (const a of await db.all('SELECT id, numero, estado, observaciones FROM acta WHERE contrato_id = ? AND (CAST(numero AS TEXT) = ? OR estado LIKE ? OR observaciones LIKE ?) ORDER BY numero', c.id, t.replace(/\D/g, ''), like, like))
+      out.push({ grupo: c.tipo === 'obra' ? 'Actas parciales' : 'Cuentas de cobro', titulo: `${c.tipo === 'obra' ? 'Acta' : 'Cuenta'} ${a.numero} · ${a.estado}`, abrir: 'acta:' + a.id });
+  }
+  const TEXTO = { vencimiento: ['descripcion', 'tipo', 'responsable'], correspondencia: ['asunto', 'radicado', 'de', 'para'], personal: ['nombre', 'cargo'],
+    poliza: ['amparo', 'aseguradora', 'numero'], bitacora: ['actividades', 'frente', 'observaciones'], ensayo: ['ensayo', 'item', 'abscisa', 'resultado'] };
+  const NOMBRE = { vencimiento: 'Vencimientos', correspondencia: 'Correspondencia', personal: 'Personal', poliza: 'Pólizas', bitacora: 'Bitácora', ensayo: 'Ensayos' };
+  for (const [tabla, cols] of Object.entries(TEXTO)) {
+    const filas = await db.all(`SELECT * FROM ${tabla} WHERE proyecto_id = ? AND (${cols.map(k => k + ' LIKE ?').join(' OR ')}) LIMIT 10`, proyectoId, ...cols.map(() => like));
+    for (const f of filas) out.push({ grupo: NOMBRE[tabla], titulo: cols.map(k => f[k]).filter(Boolean).join(' · ') + (f.fecha ? ' · ' + f.fecha : ''), abrir: 'tabla:' + tabla });
+  }
+  return out.slice(0, 60);
+}
+
+// Campana: vencimientos, pólizas y respuestas pendientes de los próximos 7 días (y los ya vencidos)
+async function avisos(proyectoId) {
+  const hoy = new Date(), iso = d => d.toISOString().slice(0, 10);
+  const limite = iso(new Date(hoy.getTime() + 7 * 86400000));
+  const out = [];
+  for (const v of await db.all(`SELECT * FROM vencimiento WHERE proyecto_id = ? AND estado <> 'Cumplido' AND fecha IS NOT NULL AND fecha <= ? ORDER BY fecha`, proyectoId, limite))
+    out.push({ fecha: v.fecha, tipo: v.tipo || 'Vencimiento', texto: v.descripcion, abrir: 'tabla:vencimiento' });
+  for (const p of await db.all(`SELECT * FROM poliza WHERE proyecto_id = ? AND COALESCE(estado, '') NOT IN ('Vencida', 'Cerrada') AND hasta IS NOT NULL AND hasta <= ? AND hasta >= ? ORDER BY hasta`, proyectoId, limite, iso(hoy)))
+    out.push({ fecha: p.hasta, tipo: 'Póliza', texto: `${p.amparo || ''} ${p.numero || ''} (${p.contrato || ''}) vence`, abrir: 'tabla:poliza' });
+  for (const c of await db.all(`SELECT * FROM correspondencia WHERE proyecto_id = ? AND requiere_respuesta = 'Sí' AND COALESCE(estado, '') NOT IN ('Cerrada', 'Respondida') AND plazo IS NOT NULL AND plazo <= ? ORDER BY plazo`, proyectoId, limite))
+    out.push({ fecha: c.plazo, tipo: 'Respuesta', texto: `${c.radicado || ''} ${c.asunto || ''}`.trim(), abrir: 'tabla:correspondencia' });
+  return out.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+// Reglas del acta: estado válido, quién lo puede poner y bloqueo después de aprobada
+async function validarEstado(u, antes, d) {
+  if (d.estado != null && !ESTADOS_ACTA.includes(d.estado)) throw new Rechazo(400, 'Estado desconocido: ' + d.estado);
+  if (bloqueada(antes)) {
+    // Bloqueada: solo se cambia el estado (avanzar, o el director la reabre)
+    if (Object.keys(d).some(k => k !== 'estado') || d.estado == null)
+      throw new Rechazo(409, `El acta ${antes.numero} está "${antes.estado}" y no se puede editar`);
+    if (ESTADOS_ACTA.indexOf(d.estado) < BLOQUEO && u.rol !== 'director') throw new Rechazo(403, 'Solo el director puede reabrir un acta aprobada');
+  }
+  if (d.estado != null && d.estado !== antes?.estado && QUIEN_ESTADO[d.estado] && !QUIEN_ESTADO[d.estado].includes(u.rol))
+    throw new Rechazo(403, `El rol ${u.rol} no puede pasar el acta a "${d.estado}"`);
+}
+
+// ---------- Asistente con Claude ----------
+// La clave de la API se toma de ANTHROPIC_API_KEY o de datos/asistente.json (solo en este equipo)
+const ARCH_ASISTENTE = path.join(DATOS, 'asistente.json');
+const claveAsistente = () => process.env.ANTHROPIC_API_KEY || (fs.existsSync(ARCH_ASISTENTE) ? JSON.parse(fs.readFileSync(ARCH_ASISTENTE, 'utf8')).clave : null);
+async function asistente(proyectoId, mensajes, u) {
+  const clave = claveAsistente();
+  if (!clave) throw new Rechazo(400, 'Falta la clave de la API de Claude: el director la configura en Inicio → Asistente');
+  const Anthropic = require('@anthropic-ai/sdk');
+  const cliente = new Anthropic({ apiKey: clave });
+  const r = await resumen(proyectoId);
+  const datos = { proyecto: r.proyecto, hoy: r.hoy, vencimientos: r.vencimientos,
+    contratos: r.contratos.map(c => ({ tipo: c.tipo, numero: c.numero, contratista: c.contratista, valor: c.valor, presupuesto: c.presupuesto, ejecutado: c.ejecutado, gastado: c.gastado,
+      actas: c.actas.map(a => ({ numero: a.numero, estado: a.estado, desde: a.desde, hasta: a.hasta, valor: a.valor, acumulado: a.acumulado })) })) };
+  let resp;
+  try { resp = await cliente.beta.messages.create({
+    model: 'claude-opus-5-5',
+    max_tokens: 16000,
+    output_config: { effort: 'medium' },
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    system: [{ type: 'text', cache_control: { type: 'ephemeral' }, text: `Eres el asistente de SIGI Pro, un sistema de gestión de interventoría de obras viales en Colombia.
+Respondes en español, con precisión y de forma breve, como un ingeniero de interventoría con experiencia en contratación estatal (Ley 80, Ley 1474, Ley 1150).
+Usa solo los datos del proyecto que se dan abajo; si algo no está en los datos, dilo. Valores en pesos colombianos.
+Usuario actual: ${u ? `${u.nombre} (${u.rol})` : 'sin identificar'}.
+
+DATOS DEL PROYECTO (JSON):
+${JSON.stringify(datos)}` }],
+    messages: mensajes.slice(-20).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
+  }); } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) throw new Rechazo(400, 'La clave de la API de Claude no es válida');
+    if (e instanceof Anthropic.RateLimitError) throw new Rechazo(429, 'El asistente está ocupado: intente en un minuto');
+    throw e;
+  }
+  if (resp.stop_reason === 'refusal') return { texto: 'El asistente no puede responder esa consulta.' };
+  return { texto: resp.content.filter(b => b.type === 'text').map(b => b.text).join('\n') };
+}
+
 // ---------- HTTP ----------
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
@@ -168,11 +308,34 @@ async function api(req, res, url) {
   const partes = url.pathname.split('/').filter(Boolean).slice(1); // sin 'api'
   const q = Object.fromEntries(url.searchParams);
   const [r0, r1, r2_, r3] = partes;
+  const u = await usuarioDe(req);
+
+  if (r0 === 'usuarios' && req.method === 'GET') return enviar(res, 200, { usuarios: await db.all('SELECT * FROM usuario WHERE activo = 1 ORDER BY id'), roles: ROLES, permisos: PERMISOS, estados_acta: ESTADOS_ACTA, bloqueo: BLOQUEO });
+  // Entrar con el correo (Gmail) registrado en un usuario
+  if (r0 === 'entrar' && req.method === 'POST') {
+    const correo = String((await leerCuerpo(req)).correo || '').trim().toLowerCase();
+    const yo = correo && (await db.get('SELECT * FROM usuario WHERE activo = 1 AND lower(correo) = ?', correo));
+    if (!yo) throw new Rechazo(404, 'Ese correo no está registrado. Pídale al director que lo agregue en Usuarios.');
+    return enviar(res, 200, yo);
+  }
+  if (r0 === 'auditoria' && req.method === 'GET') return enviar(res, 200, await db.all('SELECT * FROM auditoria ORDER BY id DESC LIMIT ?', Number(q.limite) || 200));
+  if (r0 === 'asistente' && r1 === 'config' && req.method === 'GET') return enviar(res, 200, { configurado: !!claveAsistente() });
+  if (r0 === 'asistente' && r1 === 'config' && req.method === 'POST') {
+    exigir(u, 'asistente');
+    const b = await leerCuerpo(req);
+    fs.writeFileSync(ARCH_ASISTENTE, JSON.stringify({ clave: String(b.clave || '').trim() }));
+    await auditar(u, 'asistente', null, 'configurar', null);
+    return enviar(res, 200, { ok: true });
+  }
+  if (r0 === 'asistente' && req.method === 'POST') { const b = await leerCuerpo(req); return enviar(res, 200, await asistente(Number(r1), b.mensajes || [], u)); }
+  if (r0 === 'buscar') return enviar(res, 200, await buscar(Number(r1), q.q));
+  if (r0 === 'avisos') return enviar(res, 200, await avisos(Number(r1)));
 
   // Sincronización
   if (r0 === 'sync' && req.method === 'GET') { const cfg = db.config(); return enviar(res, 200, { ...db.estado, url: cfg?.url || null }); }
+  if (r0 === 'sync' && req.method !== 'GET') exigir(u, 'sync');
   if (r0 === 'sync' && r1 === 'probar') { const b = await leerCuerpo(req); return enviar(res, 200, await Base.probar(b.url, b.token)); }
-  if (r0 === 'sync' && r1 === 'activar') { const b = await leerCuerpo(req); const r = await db.activarNube(b.url, b.token, ESQUEMA); await iniciar(); return enviar(res, 200, r); }
+  if (r0 === 'sync' && r1 === 'activar') { const b = await leerCuerpo(req); const r = await db.activarNube(b.url, b.token, ESQUEMA); await iniciar(); await auditar(u, 'sync', null, 'activar', { url: b.url }); return enviar(res, 200, r); }
   if (r0 === 'sync' && r1 === 'desactivar') { await db.desactivarNube(); await iniciar(); return enviar(res, 200, { ok: true }); }
   if (r0 === 'sync' && r1 === 'ahora') { await db.sincronizar(); return enviar(res, 200, db.estado); }
 
@@ -191,21 +354,26 @@ async function api(req, res, url) {
   }
   if (r0 === 'acta' && req.method === 'GET') return enviar(res, 200, (await detalleActa(Number(r1))) || { error: 'No existe' });
   if (r0 === 'acta' && r2_ === 'item' && req.method === 'PUT') {
+    exigir(u, 'acta_item'); await actaEditable(Number(r1));
     const b = await leerCuerpo(req);
     const prev = (await db.get('SELECT * FROM acta_item WHERE acta_id = ? AND item_id = ?', Number(r1), Number(r3))) || {};
     const v = { cant_presentada: 0, cant_aprobada: 0, observacion: null, ...prev, ...b };
     await db.run(`INSERT INTO acta_item (acta_id, item_id, cant_presentada, cant_aprobada, observacion) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (acta_id, item_id) DO UPDATE SET cant_presentada = excluded.cant_presentada, cant_aprobada = excluded.cant_aprobada, observacion = excluded.observacion`,
       Number(r1), Number(r3), Number(v.cant_presentada) || 0, Number(v.cant_aprobada) || 0, v.observacion ?? null);
+    await auditar(u, 'acta_item', `${r1}/${r3}`, 'editar', diferencia(prev, b));
     return enviar(res, 200, { ok: true });
   }
   if (r0 === 'acta' && r2_ === 'aprobar-todo' && req.method === 'POST') {
+    exigir(u, 'acta_item'); await actaEditable(Number(r1));
+    await auditar(u, 'acta_item', r1, 'aprobar-todo', null);
     await db.run('UPDATE acta_item SET cant_aprobada = cant_presentada WHERE acta_id = ?', Number(r1));
     return enviar(res, 200, { ok: true });
   }
 
   // Pegar filas desde Excel: [{codigo, descripcion, unidad, cantidad, vr_unitario}] — una fila sin unidad ni cantidad es capítulo
   if (r0 === 'pegar' && req.method === 'POST') {
+    exigir(u, 'item');
     const b = await leerCuerpo(req);
     let orden = (await db.get('SELECT COALESCE(MAX(orden), 0) m FROM item WHERE contrato_id = ?', b.contrato_id)).m;
     let padre = b.padre_id || null, n = 0;
@@ -216,6 +384,7 @@ async function api(req, res, url) {
       if (cap) padre = r.id;
       n++;
     }
+    await auditar(u, 'item', null, 'pegar', { contrato_id: b.contrato_id, filas: n });
     return enviar(res, 200, { ok: true, filas: n });
   }
 
@@ -228,20 +397,36 @@ async function api(req, res, url) {
       const orden = { item: 'orden, id', acta: 'numero', vencimiento: 'fecha IS NULL, fecha', gasto: 'fecha DESC, id DESC', correspondencia: 'fecha DESC', bitacora: 'fecha DESC', ensayo: 'fecha DESC' }[tabla] || 'id';
       return enviar(res, 200, await db.all(`SELECT * FROM ${tabla}${filtro} ORDER BY ${orden}`, ...(filtro ? [Number(q[padre])] : [])));
     }
+    if (req.method !== 'GET') exigir(u, tabla);
     if (req.method === 'POST') {
       const d = limpiar(tabla, await leerCuerpo(req));
       if (tabla === 'item' && d.orden == null) d.orden = (await db.get('SELECT COALESCE(MAX(orden), 0) + 1 m FROM item WHERE contrato_id = ?', d.contrato_id)).m;
+      if (tabla === 'acta') await validarEstado(u, null, d);
+      if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (tabla === 'acta' && d.numero == null) d.numero = (await db.get('SELECT COALESCE(MAX(numero), 0) + 1 m FROM acta WHERE contrato_id = ?', d.contrato_id)).m;
       const k = Object.keys(d);
       const r = await db.run(`INSERT INTO ${tabla} (${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`, ...Object.values(d));
-      return enviar(res, 200, await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, r.id));
+      const nuevo = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, r.id);
+      await auditar(u, tabla, r.id, 'crear', d);
+      return enviar(res, 200, nuevo);
     }
     if (req.method === 'PUT' && id) {
       const d = limpiar(tabla, await leerCuerpo(req)), k = Object.keys(d);
+      const antes = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id);
+      if (!antes) throw new Rechazo(404, 'No existe');
+      if (tabla === 'acta') await validarEstado(u, antes, d);
+      if (tabla === 'usuario' && d.rol && !ROLES.includes(d.rol)) throw new Rechazo(400, 'Rol desconocido: ' + d.rol);
       if (k.length) await db.run(`UPDATE ${tabla} SET ${k.map(c => c + ' = ?').join(', ')} WHERE id = ?`, ...Object.values(d), id);
+      const cambio = diferencia(antes, d);
+      if (Object.keys(cambio).length) await auditar(u, tabla, id, 'editar', cambio);
       return enviar(res, 200, await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id));
     }
-    if (req.method === 'DELETE' && id) { await borrar(tabla, id); return enviar(res, 200, { ok: true }); }
+    if (req.method === 'DELETE' && id) {
+      if (tabla === 'acta') await actaEditable(id);
+      const antes = await db.get(`SELECT * FROM ${tabla} WHERE id = ?`, id);
+      await borrar(tabla, id); await auditar(u, tabla, id, 'borrar', antes);
+      return enviar(res, 200, { ok: true });
+    }
   }
   enviar(res, 404, { error: 'Ruta no encontrada' });
 }
@@ -254,6 +439,7 @@ const servidor = http.createServer(async (req, res) => {
     if (!archivo.startsWith(path.join(RAIZ, 'public')) || !fs.existsSync(archivo)) return enviar(res, 404, 'No encontrado', 'text/plain');
     enviar(res, 200, fs.readFileSync(archivo), TIPOS[path.extname(archivo)] || 'application/octet-stream');
   } catch (e) {
+    if (e instanceof Rechazo) return enviar(res, e.codigo, { error: e.message });
     console.error(e);
     const sinRed = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(e.message);
     enviar(res, 500, { error: sinRed ? 'Sin conexión con la nube: puede consultar, pero los cambios no se guardaron. Revise el internet.' : e.message });
